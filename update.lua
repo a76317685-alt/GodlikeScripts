@@ -1479,7 +1479,418 @@ do
     print("[Godlike] Settings+ loaded — keybind, themes, reset")
 end
 -- ==================== END SETTINGS+ BLOCK ====================
+-- language: Lua, file: godlike_config_trade.lua, runtime: Roblox Executor, deps: none
+-- *watch for: MM2 цены меняются — дефолт-таблица в HUGE_RARES, обновляй руками*
+-- *watch for: trade window имена GUI — "Trade"/"TradingGui"; если игра обновит — ищи GetFullName по тегу*
+-- *watch for: setclipboard/readfile опциональны, fallback на warn*
 
+-- ==================== CONFIG TAB + TRADE HELPER ====================
+-- вставляется до print("[Godlike MM2] ...") но ПОСЛЕ Settings+ блока
+
+do
+    -- ==================== CONFIG TAB ====================
+    local TConfig = makeTab("config")
+
+    local function listConfigFiles()
+        if not (listfiles and isfolder) then return {} end
+        local out = {}
+        pcall(function()
+            if not isfolder("godlike") then return end
+            for _, f in pairs(listfiles("godlike")) do
+                if f:sub(-5) == ".json" then
+                    out[#out+1] = f:match("[^/\\]+$"):gsub("%.json$","")
+                end
+            end
+        end)
+        table.sort(out)
+        return out
+    end
+
+    local function doLoad(name)
+        if not (readfile and isfile and HS) then
+            print("[Godlike] no fs API — cannot load")
+            return
+        end
+        local path = "godlike/"..name..".json"
+        if not isfile(path) then
+            print("[Godlike] no file: "..path)
+            return
+        end
+        local ok, d = pcall(function() return HS:JSONDecode(readfile(path)) end)
+        if not ok or type(d) ~= "table" then
+            print("[Godlike] bad json: "..path)
+            return
+        end
+        for k,v in pairs(d) do
+            if registry[k] and registry[k].set then
+                pcall(function() registry[k].set(v) end)
+            end
+        end
+        print("[Godlike] loaded → "..name)
+    end
+
+    local function doDelete(name)
+        if not (delfile and isfile) then return end
+        local path = "godlike/"..name..".json"
+        if isfile(path) then
+            pcall(function() delfile(path) end)
+            print("[Godlike] deleted "..name)
+        end
+    end
+
+    -- header
+    local header = n("TextLabel",{
+        Parent=TConfig.page, BackgroundTransparency=1,
+        Size=UDim2.new(1,-12,0,22), Font=Enum.Font.GothamBold,
+        Text="─ SAVED CONFIGS ─", TextColor3=COL.titleText, TextSize=13,
+        TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7,
+    })
+
+    local listFrame = n("ScrollingFrame",{
+        Parent=TConfig.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+        Size=UDim2.new(1,-12,0,240), ScrollBarThickness=4,
+        CanvasSize=UDim2.new(0,0,0,0), AutomaticCanvasSize=Enum.AutomaticSize.Y,
+        ZIndex=6,
+    })
+    n("UICorner",{CornerRadius=UDim.new(0,6),Parent=listFrame})
+    n("UIListLayout",{Parent=listFrame,Padding=UDim.new(0,4),SortOrder=Enum.SortOrder.LayoutOrder})
+    n("UIPadding",{Parent=listFrame,PaddingTop=UDim.new(0,6),PaddingBottom=UDim.new(0,6),PaddingLeft=UDim.new(0,6),PaddingRight=UDim.new(0,6)})
+
+    local selectedName = nil
+    local rowButtons = {}
+
+    local function refreshList()
+        for _, b in pairs(rowButtons) do b:Destroy() end
+        rowButtons = {}
+        local names = listConfigFiles()
+        if #names == 0 then
+            local empty = n("TextLabel",{
+                Parent=listFrame, BackgroundTransparency=1,
+                Size=UDim2.new(1,0,0,30), Font=Enum.Font.Gotham,
+                Text="(no configs — save one in Settings)",
+                TextColor3=Color3.fromRGB(120,120,120), TextSize=12, ZIndex=7,
+            })
+            rowButtons[#rowButtons+1] = empty
+            return
+        end
+        for i, nm in ipairs(names) do
+            local row = n("TextButton",{
+                Parent=listFrame, BackgroundColor3=Color3.fromRGB(245,245,245),
+                BorderSizePixel=0, Size=UDim2.new(1,-12,0,32),
+                Font=Enum.Font.GothamBold, Text=nm, TextColor3=COL.tabText,
+                TextSize=13, TextXAlignment=Enum.TextXAlignment.Left,
+                AutoButtonColor=false, LayoutOrder=i, ZIndex=7,
+            })
+            n("UICorner",{CornerRadius=UDim.new(0,5),Parent=row})
+            n("UIPadding",{Parent=row,PaddingLeft=UDim.new(0,10)})
+
+            local del = n("TextButton",{
+                Parent=row, BackgroundTransparency=1,
+                Position=UDim2.new(1,-30,0,0), Size=UDim2.new(0,28,1,0),
+                Font=Enum.Font.GothamBold, Text="×", TextColor3=Color3.fromRGB(200,60,60),
+                TextSize=18, AutoButtonColor=false, ZIndex=8,
+            })
+
+            row.Activated:Connect(function()
+                selectedName = nm
+                for _, r in pairs(rowButtons) do
+                    if r:IsA("TextButton") then r.BackgroundColor3 = Color3.fromRGB(245,245,245) end
+                end
+                row.BackgroundColor3 = Color3.fromRGB(200,220,255)
+                print("[Godlike] selected: "..nm)
+            end)
+            del.Activated:Connect(function()
+                doDelete(nm)
+                task.wait(0.15)
+                refreshList()
+            end)
+
+            rowButtons[#rowButtons+1] = row
+        end
+    end
+
+    local refreshBtn = n("TextButton",{
+        Parent=TConfig.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+        Size=UDim2.new(1,-12,0,32), Font=Enum.Font.GothamBold,
+        Text="↻ Refresh List", TextColor3=COL.tabText, TextSize=13,
+        TextXAlignment=Enum.TextXAlignment.Left, AutoButtonColor=false, ZIndex=6,
+    })
+    n("UICorner",{CornerRadius=UDim.new(0,6),Parent=refreshBtn})
+    n("UIPadding",{Parent=refreshBtn,PaddingLeft=UDim.new(0,12)})
+    refreshBtn.Activated:Connect(refreshList)
+
+    local loadBtn = n("TextButton",{
+        Parent=TConfig.page, BackgroundColor3=Color3.fromRGB(35,140,70), BorderSizePixel=0,
+        Size=UDim2.new(1,-12,0,40), Font=Enum.Font.GothamBold,
+        Text="▶ Load Selected", TextColor3=Color3.fromRGB(255,255,255), TextSize=15,
+        AutoButtonColor=false, ZIndex=6,
+    })
+    n("UICorner",{CornerRadius=UDim.new(0,6),Parent=loadBtn})
+    loadBtn.Activated:Connect(function()
+        if not selectedName then
+            print("[Godlike] nothing selected")
+            return
+        end
+        doLoad(selectedName)
+    end)
+
+    refreshList()
+
+    -- ==================== TRADE HELPER ====================
+    local TPrice = makeTab("prices")
+
+    -- базовая таблица цен (пример, обновляй под актуальный рынок)
+    local HUGE_PRICES = {
+        -- name (lowercase) = value in "value units"
+        ["chroma darkbringer"]        = 12000,
+        ["chroma lightbringer"]       = 12000,
+        ["chroma gemstone"]           = 9000,
+        ["chroma deathshard"]         = 8000,
+        ["chroma fang"]               = 7500,
+        ["chroma laser"]              = 6500,
+        ["chroma saw"]                = 6000,
+        ["chroma seer"]               = 5500,
+        ["chroma tides"]              = 5000,
+        ["chroma shark"]              = 4500,
+        ["chroma slasher"]            = 4000,
+        ["traveler's gun"]            = 3000,
+        ["traveler's knife"]          = 3000,
+        ["gingerbread knife"]         = 2500,
+        ["sugar"]                     = 2200,
+        ["elderwood scythe"]          = 2000,
+        ["hallow's edge"]             = 1800,
+        ["battleaxe"]                 = 1500,
+        ["battleaxe ii"]              = 1600,
+        ["vampire's axe"]             = 1400,
+        ["spider"]                    = 1200,
+        ["jingle gun"]                = 1000,
+        ["snowflake"]                 = 900,
+        ["gingerbread"]               = 800,
+        ["peppermint"]                = 700,
+        ["logchopper"]                = 650,
+        ["gingermint"]                = 600,
+        ["icebreaker"]                = 550,
+        ["icewing"]                   = 500,
+        ["ice dragon"]                = 480,
+        ["frostbite"]                 = 450,
+        ["ghostblade"]                = 420,
+        ["nebula"]                    = 400,
+        ["flames"]                    = 380,
+        ["ripper"]                    = 350,
+        ["splitter"]                  = 330,
+        ["seer"]                      = 300,
+        ["deathshard"]                = 280,
+        ["tides"]                     = 260,
+        ["shark"]                     = 240,
+        ["slasher"]                   = 220,
+        ["laser"]                     = 200,
+        ["fang"]                      = 180,
+        ["saw"]                       = 160,
+        ["gemstone"]                  = 140,
+        ["lightbringer"]              = 130,
+        ["darkbringer"]               = 120,
+    }
+
+    local function priceOf(name)
+        if not name then return 0 end
+        local key = name:lower():gsub("^%s+",""):gsub("%s+$","")
+        return HUGE_PRICES[key] or 0
+    end
+
+    local function verdictColor(myTotal, theirTotal)
+        if theirTotal == 0 or myTotal == 0 then return Color3.fromRGB(180,180,180), "?" end
+        local ratio = theirTotal / myTotal
+        if ratio >= 1.15 then return Color3.fromRGB(80,220,120), "WIN"       -- они дают больше
+        elseif ratio <= 0.85 then return Color3.fromRGB(220,80,80), "LOSS"    -- они дают меньше
+        else return Color3.fromRGB(255,200,80), "FAIR" end
+    end
+
+    -- header и сводка
+    local info = n("TextLabel",{
+        Parent=TPrice.page, BackgroundTransparency=1,
+        Size=UDim2.new(1,-12,0,22), Font=Enum.Font.GothamBold,
+        Text="─ TRADE HELPER (live) ─", TextColor3=COL.titleText, TextSize=13,
+        TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7,
+    })
+
+    local myBox = n("Frame",{Parent=TPrice.page,BackgroundColor3=COL.btn,BorderSizePixel=0,Size=UDim2.new(1,-12,0,60),ZIndex=6})
+    n("UICorner",{CornerRadius=UDim.new(0,6),Parent=myBox})
+    n("TextLabel",{Parent=myBox,BackgroundTransparency=1,Position=UDim2.new(0,10,0,6),Size=UDim2.new(1,-20,0,20),Font=Enum.Font.GothamBold,Text="YOUR SIDE",TextColor3=COL.tabText,TextSize=12,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=7})
+    local myVal = n("TextLabel",{Parent=myBox,BackgroundTransparency=1,Position=UDim2.new(0,10,0,26),Size=UDim2.new(1,-20,0,26),Font=Enum.Font.Code,Text="0",TextColor3=COL.titleText,TextSize=16,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=7})
+
+    local theirBox = n("Frame",{Parent=TPrice.page,BackgroundColor3=COL.btn,BorderSizePixel=0,Size=UDim2.new(1,-12,0,60),ZIndex=6})
+    n("UICorner",{CornerRadius=UDim.new(0,6),Parent=theirBox})
+    n("TextLabel",{Parent=theirBox,BackgroundTransparency=1,Position=UDim2.new(0,10,0,6),Size=UDim2.new(1,-20,0,20),Font=Enum.Font.GothamBold,Text="THEIR SIDE",TextColor3=COL.tabText,TextSize=12,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=7})
+    local theirVal = n("TextLabel",{Parent=theirBox,BackgroundTransparency=1,Position=UDim2.new(0,10,0,26),Size=UDim2.new(1,-20,0,26),Font=Enum.Font.Code,Text="0",TextColor3=COL.titleText,TextSize=16,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=7})
+
+    local verdict = n("Frame",{Parent=TPrice.page,BackgroundColor3=COL.btn,BorderSizePixel=0,Size=UDim2.new(1,-12,0,50),ZIndex=6})
+    n("UICorner",{CornerRadius=UDim.new(0,6),Parent=verdict})
+    local verdictLbl = n("TextLabel",{Parent=verdict,BackgroundTransparency=1,Size=UDim2.fromScale(1,1),Font=Enum.Font.GothamBold,Text="—",TextColor3=COL.titleText,TextSize=20,ZIndex=7})
+
+    local detailLbl = n("TextLabel",{
+        Parent=TPrice.page, BackgroundTransparency=1,
+        Size=UDim2.new(1,-12,0,200), Font=Enum.Font.Code,
+        Text="", TextColor3=COL.tabText, TextSize=12,
+        TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Top,
+        TextWrapped=true, ZIndex=7,
+    })
+
+    -- ==== сканер трейда ====
+    -- MM2 трейд-окно живёт в CoreGui или PlayerGui, ищем по именам
+    local function findTradeGui()
+        local roots = {CoreGui, LP:FindFirstChild("PlayerGui"), game:GetService("Players")}
+        for _, root in ipairs({CoreGui, LP:FindFirstChild("PlayerGui")}) do
+            if not root then continue end
+            for _, d in pairs(root:GetDescendants()) do
+                if d.Name == "TradingGui" or d.Name == "Trade" or d.Name == "TradeWindow" then
+                    return d
+                end
+            end
+        end
+        return nil
+    end
+
+    -- fallback: элементы в руках у игроков в трейде + предметы в окне
+    local function collectHandItems()
+        local mine, theirs = {}, {}
+        -- предметы в руках (Tool) — самый стабильный признак
+        local myChar = LP.Character
+        if myChar then
+            for _, t in pairs(myChar:GetChildren()) do
+                if t:IsA("Tool") then mine[#mine+1] = t.Name end
+            end
+        end
+        -- остальные игроки в трейде держат предметы
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= LP and p.Character then
+                for _, t in pairs(p.Character:GetChildren()) do
+                    if t:IsA("Tool") then theirs[#theirs+1] = t.Name end
+                end
+            end
+        end
+        return mine, theirs
+    end
+
+    local function sumList(list)
+        local total, lines = 0, {}
+        for _, nm in ipairs(list) do
+            local v = priceOf(nm)
+            total = total + v
+            lines[#lines+1] = string.format("%-28s %6d", nm, v)
+        end
+        return total, lines
+    end
+
+    local lastScan = 0
+    task.spawn(function()
+        while task.wait(0.75) do
+            local mine, theirs = collectHandItems()
+            local mTotal, mLines = sumList(mine)
+            local tTotal, tLines = sumList(theirs)
+
+            myVal.Text    = string.format("%d  (%d items)", mTotal, #mine)
+            theirVal.Text = string.format("%d  (%d items)", tTotal, #theirs)
+
+            local col, tag = verdictColor(mTotal, tTotal)
+            verdictLbl.Text = tag
+            verdictLbl.TextColor3 = col
+            verdict.BackgroundColor3 = col:Lerp(Color3.new(1,1,1), 0.85)
+
+            local lines = {}
+            lines[#lines+1] = "YOURS:"
+            for _, l in ipairs(mLines) do lines[#lines+1] = "  "..l end
+            lines[#lines+1] = ""
+            lines[#lines+1] = "THEIRS:"
+            for _, l in ipairs(tLines) do lines[#lines+1] = "  "..l end
+            detailLbl.Text = table.concat(lines, "\n")
+        end
+    end)
+
+    -- ==== инвентарь — цены ====
+    -- вешаем BillboardGui/TextLabel на Tool в Backpack и Character
+    local invRoot = n("ScreenGui",{Name="G_InvPrice",ResetOnSpawn=false,Parent=CoreGui})
+
+    local function priceTagFor(tool)
+        local v = priceOf(tool.Name)
+        if v == 0 then return end
+        -- в рюкзаке не видно в мире, но в character держит — показываем над рукой
+        local holder = tool.Parent
+        if holder and holder:IsA("Model") then
+            local head = holder:FindFirstChild("Head")
+            if not head then return end
+            local existing = head:FindFirstChild("G_PriceTag_"..tool.Name)
+            if existing then
+                existing.TextLabel.Text = "$ "..v
+                return
+            end
+            local bb = n("BillboardGui",{
+                Name="G_PriceTag_"..tool.Name,
+                Size=UDim2.new(0,140,0,26),
+                StudsOffset=Vector3.new(0, -1.5, 0),
+                AlwaysOnTop=true, Parent=head,
+            })
+            n("TextLabel",{
+                Parent=bb, BackgroundTransparency=1, Size=UDim2.fromScale(1,1),
+                Font=Enum.Font.GothamBold, Text="$ "..v,
+                TextColor3=Color3.fromRGB(255,215,0),
+                TextStrokeColor3=Color3.new(0,0,0), TextStrokeTransparency=0.2,
+                TextSize=14,
+            })
+        end
+    end
+
+    -- кнопка «показать цены в инвентаре» — тоггл
+    makeToggle(TPrice.page, "Show Prices Over Tools", "inv_price", true)
+
+    task.spawn(function()
+        while task.wait(0.6) do
+            if registry.inv_price and registry.inv_price.get() then
+                for _, p in pairs(Players:GetPlayers()) do
+                    if p.Character then
+                        for _, t in pairs(p.Character:GetChildren()) do
+                            if t:IsA("Tool") then priceTagFor(t) end
+                        end
+                    end
+                    local bp = p:FindFirstChild("Backpack")
+                    if bp then
+                        for _, t in pairs(bp:GetChildren()) do
+                            if t:IsA("Tool") then
+                                local v = priceOf(t.Name)
+                                if v > 0 and p == LP and setclipboard then
+                                    -- nothing, только справочно
+                                end
+                            end
+                        end
+                    end
+                end
+            else
+                for _, p in pairs(Players:GetPlayers()) do
+                    if p.Character then
+                        local head = p.Character:FindFirstChild("Head")
+                        if head then
+                            for _, c in pairs(head:GetChildren()) do
+                                if c.Name:sub(1, 12) == "G_PriceTag_" then c:Destroy() end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+
+    -- кнопка «обновить список»
+    makeRealBtn(TPrice.page, "Copy Trade Summary", function()
+        local mine, theirs = collectHandItems()
+        local mT = sumList(mine)
+        local tT = sumList(theirs)
+        local txt = string.format("Me: %d | Them: %d | Diff: %+d", mT, tT, tT - mT)
+        if setclipboard then setclipboard(txt) end
+        print("[Godlike] "..txt)
+    end)
+
+    print("[Godlike] Config + Trade Helper loaded")
+end
+-- ==================== END CONFIG + TRADE HELPER ====================
 print("[Godlike MM2] Kiti Cube Edition loaded.")
 print("[Godlike MM2] Kiti Cube Edition loaded.")
 print("[Godlike MM2] Kiti Cube Edition loaded.")
