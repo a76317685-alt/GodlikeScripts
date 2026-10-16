@@ -1891,6 +1891,483 @@ do
     print("[Godlike] Config + Trade Helper loaded")
 end
 -- ==================== END CONFIG + TRADE HELPER ====================
-print("[Godlike MM2] Kiti Cube Edition loaded.")
-print("[Godlike MM2] Kiti Cube Edition loaded.")
+-- language: Lua, file: godlike_visual_menu_plus.lua, runtime: Roblox Executor, deps: none
+-- *watch for: Sky требует Lighting, если уже есть Sky — сохраняем и восстанавливаем*
+-- *watch for: Wings делаем чистым Instance.new, без внешних мешей — работает в любой игре*
+-- *watch for: смена языка перекрашивает Text у известных нам элементов по refs*
+
+-- ==================== VISUAL+ / MENU+ BLOCK ====================
+-- вставляется после Config+Trade блока, до print("[Godlike MM2] ...")
+
+do
+    -- ==================== I18N ====================
+    local LANG = { ru = true, en = false }
+    local STR = {
+        ru = {
+            -- tabs
+            main = "главное", visual = "визуал", combat = "бой", pvp = "пвп",
+            farm = "фарм", setting = "настройки", config = "конфиги", prices = "цены",
+            menu = "меню",
+            -- menu tab
+            menu_title = "─ ФОРМА МЕНЮ ─",
+            shape_square = "Квадрат", shape_round = "Круг", shape_soft = "Скруглённый", shape_sharp = "Острая",
+            pen_title = "─ ЦВЕТ ПЕНИ ─",
+            pen_black = "Чёрный", pen_white = "Белый", pen_std = "Стандарт",
+            lang_title = "─ ЯЗЫК ─",
+            lang_ru = "Русский", lang_en = "English",
+            -- visual tab
+            sky_title = "─ НЕБО ─",
+            sky_default = "Стандарт", sky_night = "Ночь", sky_sunset = "Закат",
+            sky_dawn = "Рассвет", sky_cloudy = "Облачно", sky_void = "Пустота",
+            wings_title = "─ КРЫЛЬЯ ─",
+            wings_toggle = "Реалистичные крылья",
+            wings_col1 = "Цвет 1", wings_col2 = "Цвет 2",
+            wings_glow = "Свечение",
+        },
+        en = {
+            main = "main", visual = "visual", combat = "combat", pvp = "pvp",
+            farm = "farm", setting = "setting", config = "config", prices = "prices",
+            menu = "menu",
+            menu_title = "─ MENU SHAPE ─",
+            shape_square = "Square", shape_round = "Circle", shape_soft = "Rounded", shape_sharp = "Sharp",
+            pen_title = "─ PEN COLOR ─",
+            pen_black = "Black", pen_white = "White", pen_std = "Default",
+            lang_title = "─ LANGUAGE ─",
+            lang_ru = "Русский", lang_en = "English",
+            sky_title = "─ SKY ─",
+            sky_default = "Default", sky_night = "Night", sky_sunset = "Sunset",
+            sky_dawn = "Dawn", sky_cloudy = "Cloudy", sky_void = "Void",
+            wings_title = "─ WINGS ─",
+            wings_toggle = "Realistic Wings",
+            wings_col1 = "Color 1", wings_col2 = "Color 2",
+            wings_glow = "Glow",
+        },
+    }
+    local function t(k) return (STR[LANG.ru and "ru" or "en"][k]) or k end
+
+    -- ссылки на табы, чтобы переименовать
+    local tabRefs = {
+        {tab = T.Main,    key = "main"},
+        {tab = T.Visual,  key = "visual"},
+        {tab = T.Combat,  key = "combat"},
+        {tab = T.Pvp,     key = "pvp"},
+        {tab = T.Farm,    key = "farm"},
+        {tab = T.Setting, key = "setting"},
+    }
+    -- config/prices/menu — создаются ниже, добавим в список после
+
+    local function applyLang()
+        for _, r in ipairs(tabRefs) do
+            if r.tab and r.tab.btn then
+                r.tab.btn.Text = t(r.key)
+            end
+        end
+        -- заголовки новых секций — через отдельный список labels
+        for _, ref in ipairs(_G.GODLIKE_LANG_LABELS or {}) do
+            if ref.inst and ref.inst.Parent then
+                ref.inst.Text = t(ref.key)
+            end
+        end
+    end
+
+    -- ==================== MENU TAB ====================
+    local TMenu = makeTab(t("menu"))
+    table.insert(tabRefs, {tab=TMenu, key="menu"})
+
+    local langLabels = {}
+    local function regLabel(inst, key)
+        langLabels[#langLabels+1] = {inst=inst, key=key}
+        _G.GODLIKE_LANG_LABELS = langLabels
+        return inst
+    end
+
+    local function head(parent, key)
+        local l = n("TextLabel",{
+            Parent=parent, BackgroundTransparency=1,
+            Size=UDim2.new(1,-12,0,22), Font=Enum.Font.GothamBold,
+            Text=t(key), TextColor3=COL.titleText, TextSize=13,
+            TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7,
+        })
+        regLabel(l, key)
+        return l
+    end
+
+    -- ---- форма меню ----
+    head(TMenu.page, "menu_title")
+
+    -- сохраняем оригинальную форму
+    local origCorner = Main:FindFirstChildOfClass("UICorner")
+    local origCornerRadius = origCorner and origCorner.CornerRadius or UDim.new(0,10)
+
+    local function applyShape(kind)
+        local c = Main:FindFirstChildOfClass("UICorner")
+        if not c then c = n("UICorner",{Parent=Main}) end
+        if kind == "square" then
+            c.CornerRadius = UDim.new(0, 0)
+        elseif kind == "round" then
+            c.CornerRadius = UDim.new(1, 0)
+        elseif kind == "soft" then
+            c.CornerRadius = UDim.new(0, 16)
+        elseif kind == "sharp" then
+            c.CornerRadius = UDim.new(0, 3)
+        end
+        -- топбар подгоняем
+        local topC = Top:FindFirstChildOfClass("UICorner")
+        if topC then topC.CornerRadius = c.CornerRadius end
+    end
+
+    local function shapeBtn(label, kind)
+        local b = n("TextButton",{
+            Parent=TMenu.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+            Size=UDim2.new(1,-12,0,32), Font=Enum.Font.GothamBold, Text=label,
+            TextColor3=COL.tabText, TextSize=13, TextXAlignment=Enum.TextXAlignment.Left,
+            AutoButtonColor=false, ZIndex=6,
+        })
+        n("UICorner",{CornerRadius=UDim.new(0,6),Parent=b})
+        n("UIPadding",{Parent=b,PaddingLeft=UDim.new(0,12)})
+        b.Activated:Connect(function() applyShape(kind); print("[Godlike] shape → "..kind) end)
+        return b
+    end
+    shapeBtn(t("shape_square"), "square")
+    shapeBtn(t("shape_round"),  "round")
+    shapeBtn(t("shape_soft"),   "soft")
+    shapeBtn(t("shape_sharp"),  "sharp")
+
+    -- ---- цвет пени ----
+    head(TMenu.page, "pen_title")
+
+    local PEN_ORIG = {
+        bg        = COL.bg,
+        bgTrans   = COL.bgTrans,
+        gradColor = gradFrame:FindFirstChildOfClass("UIGradient") and gradFrame:FindFirstChildOfClass("UIGradient").Color or nil,
+    }
+
+    local function applyPen(kind)
+        local grad = gradFrame:FindFirstChildOfClass("UIGradient")
+        if kind == "black" then
+            Main.BackgroundColor3 = Color3.fromRGB(0,0,0)
+            Top.BackgroundColor3  = Color3.fromRGB(0,0,0)
+            SideScroll.BackgroundColor3 = Color3.fromRGB(0,0,0)
+            Body.BackgroundColor3 = Color3.fromRGB(0,0,0)
+            if grad then grad.Enabled = false end
+            gradFrame.BackgroundColor3 = Color3.fromRGB(0,0,0)
+        elseif kind == "white" then
+            Main.BackgroundColor3 = Color3.fromRGB(255,255,255)
+            Top.BackgroundColor3  = Color3.fromRGB(255,255,255)
+            SideScroll.BackgroundColor3 = Color3.fromRGB(255,255,255)
+            Body.BackgroundColor3 = Color3.fromRGB(255,255,255)
+            if grad then grad.Enabled = false end
+            gradFrame.BackgroundColor3 = Color3.fromRGB(255,255,255)
+        else -- standard
+            Main.BackgroundColor3 = PEN_ORIG.bg
+            Top.BackgroundColor3  = PEN_ORIG.bg
+            SideScroll.BackgroundColor3 = PEN_ORIG.bg
+            Body.BackgroundColor3 = PEN_ORIG.bg
+            if grad then grad.Enabled = true end
+        end
+        print("[Godlike] pen → "..kind)
+    end
+
+    local function penBtn(label, kind)
+        local b = n("TextButton",{
+            Parent=TMenu.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+            Size=UDim2.new(1,-12,0,32), Font=Enum.Font.GothamBold, Text=label,
+            TextColor3=COL.tabText, TextSize=13, TextXAlignment=Enum.TextXAlignment.Left,
+            AutoButtonColor=false, ZIndex=6,
+        })
+        n("UICorner",{CornerRadius=UDim.new(0,6),Parent=b})
+        n("UIPadding",{Parent=b,PaddingLeft=UDim.new(0,12)})
+        b.Activated:Connect(function() applyPen(kind) end)
+        return b
+    end
+    penBtn(t("pen_black"), "black")
+    penBtn(t("pen_white"), "white")
+    penBtn(t("pen_std"),   "standard")
+
+    -- ---- язык ----
+    head(TMenu.page, "lang_title")
+
+    local function langBtn(label, code)
+        local b = n("TextButton",{
+            Parent=TMenu.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+            Size=UDim2.new(1,-12,0,32), Font=Enum.Font.GothamBold, Text=label,
+            TextColor3=COL.tabText, TextSize=13, TextXAlignment=Enum.TextXAlignment.Left,
+            AutoButtonColor=false, ZIndex=6,
+        })
+        n("UICorner",{CornerRadius=UDim.new(0,6),Parent=b})
+        n("UIPadding",{Parent=b,PaddingLeft=UDim.new(0,12)})
+        b.Activated:Connect(function()
+            LANG.ru = (code == "ru")
+            applyLang()
+            -- перекрашиваем хэдеры новых секций
+            for _, ref in ipairs(langLabels) do
+                if ref.inst and ref.inst.Parent then ref.inst.Text = t(ref.key) end
+            end
+            print("[Godlike] lang → "..code)
+        end)
+        return b
+    end
+    langBtn(t("lang_ru"), "ru")
+    langBtn(t("lang_en"), "en")
+
+    -- ==================== VISUAL+ : SKY ====================
+    -- добавляем в Visual tab
+
+    local origSky = game:GetService("Lighting"):FindFirstChildOfClass("Sky")
+    local origSkyProps = nil
+    if origSky then
+        origSkyProps = {
+            SkyboxBk = origSky.SkyboxBk,
+            SkyboxDn = origSky.SkyboxDn,
+            SkyboxFt = origSky.SkyboxFt,
+            SkyboxLf = origSky.SkyboxLf,
+            SkyboxRt = origSky.SkyboxRt,
+            SkyboxUp = origSky.SkyboxUp,
+            SunAngularSize = origSky.SunAngularSize,
+            MoonAngularSize = origSky.MoonAngularSize,
+        }
+    end
+
+    local function removeGradientSky()
+        local L = game:GetService("Lighting")
+        for _, c in pairs(L:GetChildren()) do
+            if c.Name == "G_Sky" then c:Destroy() end
+        end
+    end
+
+    local function makeGradientSky(top, bottom)
+        removeGradientSky()
+        local L = game:GetService("Lighting")
+        local sky = n("Sky",{
+            Name = "G_Sky", Parent = L,
+            CelestialBodiesShown = false,
+        })
+        -- пустые текстуры → используем Atmosphere для цвета
+        local atm = L:FindFirstChildOfClass("Atmosphere")
+        if not atm then
+            atm = n("Atmosphere",{Name="G_Atm",Parent=L})
+        end
+        atm.Color = top
+        atm.Decay = bottom
+        atm.Density = 0.4
+        atm.Haze = 1.5
+        atm.Glare = 0
+        return sky, atm
+    end
+
+    local function applySky(kind)
+        local L = game:GetService("Lighting")
+        local atm = L:FindFirstChildOfClass("Atmosphere")
+        if kind == "default" then
+            removeGradientSky()
+            if atm then atm:Destroy() end
+            if origSky and origSky.Parent == nil then origSky.Parent = L end
+            if origSkyProps and origSky then
+                for k,v in pairs(origSkyProps) do origSky[k] = v end
+            end
+            L.ClockTime = 14
+            L.Brightness = 2
+            L.Ambient = Color3.fromRGB(70,70,70)
+            L.OutdoorAmbient = Color3.fromRGB(128,128,128)
+        elseif kind == "night" then
+            removeGradientSky()
+            if origSky then origSky.Parent = nil end
+            makeGradientSky(Color3.fromRGB(8,12,40), Color3.fromRGB(0,0,10))
+            L.ClockTime = 0
+            L.Brightness = 0.7
+            L.Ambient = Color3.fromRGB(30,30,60)
+            L.OutdoorAmbient = Color3.fromRGB(20,20,50)
+        elseif kind == "sunset" then
+            removeGradientSky()
+            if origSky then origSky.Parent = nil end
+            makeGradientSky(Color3.fromRGB(255,130,60), Color3.fromRGB(40,20,80))
+            L.ClockTime = 18
+            L.Brightness = 2
+            L.Ambient = Color3.fromRGB(160,100,80)
+            L.OutdoorAmbient = Color3.fromRGB(180,120,100)
+        elseif kind == "dawn" then
+            removeGradientSky()
+            if origSky then origSky.Parent = nil end
+            makeGradientSky(Color3.fromRGB(255,200,150), Color3.fromRGB(80,120,200))
+            L.ClockTime = 6
+            L.Brightness = 2
+            L.Ambient = Color3.fromRGB(150,150,180)
+            L.OutdoorAmbient = Color3.fromRGB(200,200,220)
+        elseif kind == "cloudy" then
+            removeGradientSky()
+            if origSky then origSky.Parent = nil end
+            makeGradientSky(Color3.fromRGB(180,180,190), Color3.fromRGB(120,120,130))
+            L.ClockTime = 14
+            L.Brightness = 1.5
+            L.Ambient = Color3.fromRGB(120,120,120)
+            L.OutdoorAmbient = Color3.fromRGB(150,150,150)
+        elseif kind == "void" then
+            removeGradientSky()
+            if origSky then origSky.Parent = nil end
+            makeGradientSky(Color3.fromRGB(0,0,0), Color3.fromRGB(0,0,0))
+            L.ClockTime = 0
+            L.Brightness = 0
+            L.Ambient = Color3.fromRGB(0,0,0)
+            L.OutdoorAmbient = Color3.fromRGB(0,0,0)
+        end
+        print("[Godlike] sky → "..kind)
+    end
+
+    -- добавляем в Visual
+    local function vhead(key)
+        local l = n("TextLabel",{
+            Parent=T.Visual.page, BackgroundTransparency=1,
+            Size=UDim2.new(1,-12,0,22), Font=Enum.Font.GothamBold,
+            Text=t(key), TextColor3=COL.titleText, TextSize=13,
+            TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7,
+        })
+        regLabel(l, key)
+        return l
+    end
+
+    vhead("sky_title")
+    local function skyBtn(label, kind)
+        local b = n("TextButton",{
+            Parent=T.Visual.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+            Size=UDim2.new(1,-12,0,30), Font=Enum.Font.GothamBold, Text=label,
+            TextColor3=COL.tabText, TextSize=13, TextXAlignment=Enum.TextXAlignment.Left,
+            AutoButtonColor=false, ZIndex=6,
+        })
+        n("UICorner",{CornerRadius=UDim.new(0,6),Parent=b})
+        n("UIPadding",{Parent=b,PaddingLeft=UDim.new(0,12)})
+        b.Activated:Connect(function() applySky(kind) end)
+        return b
+    end
+    skyBtn(t("sky_default"), "default")
+    skyBtn(t("sky_night"),   "night")
+    skyBtn(t("sky_sunset"),  "sunset")
+    skyBtn(t("sky_dawn"),    "dawn")
+    skyBtn(t("sky_cloudy"),  "cloudy")
+    skyBtn(t("sky_void"),    "void")
+
+    -- ==================== VISUAL+ : WINGS ====================
+    vhead("wings_title")
+
+    local wings = nil
+    local wingState = {
+        color1 = Color3.fromRGB(255,255,255),
+        color2 = Color3.fromRGB(120,180,255),
+        glow = true,
+    }
+
+    local function buildWings()
+        if wings then return end
+        local c = LP.Character
+        if not c then return end
+        local rootPart = c:FindFirstChild("HumanoidRootPart")
+        if not rootPart then return end
+
+        local model = n("Model",{Name="G_Wings",Parent=c})
+
+        local function wing(sideSign, name)
+            local part = n("Part",{
+                Name = name,
+                Size = Vector3.new(4, 2.4, 0.3),
+                Anchored = false, CanCollide = false, Massless = true,
+                TopSurface = Enum.SurfaceType.Smooth,
+                BottomSurface = Enum.SurfaceType.Smooth,
+                Material = Enum.Material.Neon,
+                Color = wingState.color1,
+                Parent = model,
+            })
+            local mesh = n("SpecialMesh",{
+                MeshType = Enum.MeshType.FileMesh,
+                MeshId = "rbxassetid://1062900801",  -- простая форма крыла (замени при желании)
+                Scale = Vector3.new(1,1,1),
+                Parent = part,
+            })
+            local weld = n("Weld",{Parent = part})
+            weld.Part0 = rootPart
+            weld.Part1 = part
+            weld.C0 = CFrame.new(sideSign * 1.2, 0.4, -0.6) * CFrame.Angles(0, math.rad(sideSign * 15), math.rad(sideSign * -20))
+            if wingState.glow then
+                local light = n("PointLight",{
+                    Color = wingState.color2,
+                    Range = 6, Brightness = 1.5,
+                    Parent = part,
+                })
+            end
+            return part
+        end
+        wing(1,  "Wing_R")
+        wing(-1, "Wing_L")
+        wings = model
+    end
+
+    local function destroyWings()
+        if wings and wings.Parent then wings:Destroy() end
+        wings = nil
+        if LP.Character then
+            local old = LP.Character:FindFirstChild("G_Wings")
+            if old then old:Destroy() end
+        end
+    end
+
+    -- тоггл крыльев
+    makeToggle(T.Visual.page, t("wings_toggle"), "wings", false, function(v)
+        if v then buildWings() else destroyWings() end
+    end)
+    -- перезавешивание при респавне
+    LP.CharacterAdded:Connect(function()
+        wings = nil
+        if registry.wings and registry.wings.get() then
+            task.wait(0.5); buildWings()
+        end
+    end)
+
+    -- цвета крыльев
+    local function applyWingColors()
+        if not wings then return end
+        for _, w in pairs(wings:GetChildren()) do
+            if w:IsA("BasePart") then
+                w.Color = wingState.color1
+                local l = w:FindFirstChildOfClass("PointLight")
+                if l then l.Color = wingState.color2 end
+            end
+        end
+    end
+
+    -- слайдеры HSV → RGB для двух цветов (просто пресеты + сдвиг по оттенку)
+    makeSlider(T.Visual.page, t("wings_col1").." (H)", "wing_h1", 0, 360, 0, function(v)
+        wingState.color1 = Color3.fromHSV(v/360, 0.8, 1)
+        applyWingColors()
+    end)
+    makeSlider(T.Visual.page, t("wings_col2").." (H)", "wing_h2", 0, 360, 210, function(v)
+        wingState.color2 = Color3.fromHSV(v/360, 0.7, 1)
+        applyWingColors()
+    end)
+    makeToggle(T.Visual.page, t("wings_glow"), "wing_glow", true, function(v)
+        wingState.glow = v
+        if wings then
+            for _, w in pairs(wings:GetChildren()) do
+                if w:IsA("BasePart") then
+                    if v and not w:FindFirstChildOfClass("PointLight") then
+                        n("PointLight",{Color=wingState.color2,Range=6,Brightness=1.5,Parent=w})
+                    elseif not v then
+                        local l = w:FindFirstChildOfClass("PointLight")
+                        if l then l:Destroy() end
+                    end
+                end
+            end
+        end
+    end)
+
+    -- ==================== экспорт ====================
+    _G.GodlikeVisualMenu = {
+        applySky = applySky,
+        applyShape = applyShape,
+        applyPen = applyPen,
+        setLang = function(code) LANG.ru = (code == "ru"); applyLang() end,
+        buildWings = buildWings,
+        destroyWings = destroyWings,
+    }
+
+    print("[Godlike] Visual+ / Menu+ loaded")
+end
+-- ==================== END VISUAL+ / MENU+ ====================
 print("[Godlike MM2] Kiti Cube Edition loaded.")
