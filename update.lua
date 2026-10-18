@@ -3643,5 +3643,645 @@ do
     print("[Fix] all loaded — tools, murderer, respawn, lobby roles")
 end
 -- ==================== END GODLIKE FIX ALL ====================
+-- language: Lua, file: godlike_fix_godlike_tags.lua, runtime: Roblox Executor, deps: none
+-- *watch for: атрибут Godlike ставится только при запуске скрипта — если юзер перезашёл, метка слетит*
+-- *watch for: BillboardGui на Head — если Head удалён (death), метка пропадает, перевешиваем в цикле*
+
+-- ==================== GODLIKE USERS TAGS ====================
+do
+    if getgenv().GodlikeTags_loaded then
+        print("[Tags] already loaded")
+        return
+    end
+    getgenv().GodlikeTags_loaded = true
+
+    -- ставим атрибут себе
+    pcall(function()
+        LP:SetAttribute("Godlike", true)
+        LP:SetAttribute("GodlikeVersion", getgenv().Godlike_version or "?")
+    end)
+
+    -- чистим себя если скрипт выгружается
+    getgenv().GodlikeTags_unload = function()
+        pcall(function() LP:SetAttribute("Godlike", nil) end)
+    end
+
+    local TAG_NAME = "G_GodlikeTag"
+    local TAG_TEXT = "◈ GODLIKE ◈"
+    local TAG_COLOR = Color3.fromRGB(120, 180, 255)
+
+    -- создать/обновить метку
+    local function makeTag(p)
+        if p == LP or not p.Character then return end
+        if not p:GetAttribute("Godlike") then return end
+        local head = p.Character:FindFirstChild("Head")
+        if not head then return end
+        local existing = head:FindFirstChild(TAG_NAME)
+        if existing then return end
+
+        local bb = Instance.new("BillboardGui")
+        bb.Name = TAG_NAME
+        bb.Size = UDim2.new(0, 180, 0, 28)
+        bb.StudsOffset = Vector3.new(0, 3.0, 0)
+        bb.AlwaysOnTop = true
+        bb.Parent = head
+
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.fromScale(1, 1)
+        lbl.BackgroundTransparency = 1
+        lbl.Font = Enum.Font.GothamBold
+        lbl.Text = TAG_TEXT
+        lbl.TextColor3 = TAG_COLOR
+        lbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        lbl.TextStrokeTransparency = 0.3
+        lbl.TextSize = 13
+        lbl.Parent = bb
+    end
+
+    -- убрать метку
+    local function removeTag(p)
+        if not p.Character then return end
+        local head = p.Character:FindFirstChild("Head")
+        if not head then return end
+        local t = head:FindFirstChild(TAG_NAME)
+        if t then t:Destroy() end
+    end
+
+    -- цикл: сканируем всех
+    task.spawn(function()
+        while task.wait(0.5) do
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LP and p.Character then
+                    if p:GetAttribute("Godlike") then
+                        makeTag(p)
+                    else
+                        removeTag(p)
+                    end
+                end
+            end
+        end
+    end)
+
+    -- при новом игроке — проверить сразу
+    Players.PlayerAdded:Connect(function(p)
+        task.wait(0.5)
+        if p:GetAttribute("Godlike") then makeTag(p) end
+    end)
+
+    -- при респавне игрока — перевесить
+    for _, p in ipairs(Players:GetPlayers()) do
+        p.CharacterAdded:Connect(function()
+            task.wait(0.5)
+            if p:GetAttribute("Godlike") then makeTag(p) end
+        end)
+    end
+
+    Players.PlayerRemoving:Connect(function(p)
+        removeTag(p)
+    end)
+
+    -- тоггл в Setting
+    if makeToggle and T and T.Setting then
+        makeToggle(T.Setting.page, "Godlike User Tags", "godlike_tags", true, function(v)
+            if not v then
+                for _, p in ipairs(Players:GetPlayers()) do removeTag(p) end
+            end
+        end)
+    end
+
+    print("[Tags] loaded — mutual Godlike user tags")
+end
+-- ==================== END GODLIKE TAGS ====================
+-- ==================== GODLIKE TAGS (RemoteEvent) ====================
+do
+    if getgenv().GodlikeTags_loaded then return end
+    getgenv().GodlikeTags_loaded = true
+
+    -- создаём RemoteEvent в workspace (видимый всем)
+    local RS = game:GetService("ReplicatedStorage")
+    local ev = RS:FindFirstChild("GodlikeTagEvent")
+    if not ev then
+        ev = Instance.new("RemoteEvent")
+        ev.Name = "GodlikeTagEvent"
+        ev.Parent = RS
+    end
+
+    -- ставим себе флаг (локально)
+    pcall(function()
+        LP:SetAttribute("Godlike", true)
+    end)
+
+    -- кидаем сигнал "я здесь" каждые 2 сек
+    task.spawn(function()
+        while task.wait(2) do
+            pcall(function()
+                ev:FireServer(LP.Name, "hello")
+            end)
+        end
+    end)
+
+    -- слушаем что приходит от других
+    local otherGodlike = {}  -- playerName -> true
+
+    ev.OnClientEvent:Connect(function(playerName, action)
+        if action == "hello" and playerName ~= LP.Name then
+            otherGodlike[playerName] = true
+            local p = Players:FindFirstChild(playerName)
+            if p then makeTag(p) end
+        end
+    end)
+
+    -- цикл: чистим тех, кто не отвечает 5 сек
+    task.spawn(function()
+        while task.wait(1) do
+            for name in pairs(otherGodlike) do
+                local p = Players:FindFirstChild(name)
+                if not p or not p.Character then
+                    otherGodlike[name] = nil
+                end
+            end
+        end
+    end)
+end
+-- language: Lua, file: godlike_fix_trade_pos.lua, runtime: Roblox Executor, deps: none
+-- *watch for: Invalid Position — это когда HRP летит в NaN/Inf или за границы карты, anti-void не всегда ловит*
+-- *watch for: TradeGUI структура может отличаться — fallback через FindFirstChild с рекурсией*
+-- *watch for: цены — локальная таблица, обновляй руками; авто-обновление с mm2values.app требует HttpGet*
+
+-- ==================== ANTI INVALID POSITION + TRADE HELPER V2 ====================
+do
+    -- ==================== ANTI INVALID POSITION ====================
+    local lastValidCFrame = nil
+    local invalidCount = 0
+    local MAX_INVALID = 5 -- после 5 подряд — принудительный респавн
+
+    local function isValidCFrame(cf)
+        if not cf then return false end
+        local pos = cf.Position
+        -- проверка на NaN/Inf
+        if pos.X ~= pos.X or pos.Y ~= pos.Y or pos.Z ~= pos.Z then return false end
+        if math.abs(pos.X) == math.huge or math.abs(pos.Y) == math.huge or math.abs(pos.Z) == math.huge then return false end
+        -- разумные границы карты (MM2 ~ ±2000 studs)
+        if math.abs(pos.X) > 5000 or math.abs(pos.Y) > 5000 or math.abs(pos.Z) > 5000 then return false end
+        -- под полом / над небом
+        if pos.Y < -100 or pos.Y > 2000 then return false end
+        return true
+    end
+
+    task.spawn(function()
+        while task.wait(0.1) do
+            if not (registry.antivoid and registry.antivoid.get()) then
+                invalidCount = 0
+                continue
+            end
+            local c = LP.Character
+            if not c then continue end
+            local hrp = c:FindFirstChild("HumanoidRootPart")
+            if not hrp then continue end
+
+            local cf = hrp.CFrame
+            if isValidCFrame(cf) then
+                lastValidCFrame = cf
+                invalidCount = 0
+            else
+                invalidCount = invalidCount + 1
+                -- возврат на последнюю валидную позицию
+                if lastValidCFrame then
+                    pcall(function()
+                        hrp.CFrame = lastValidCFrame
+                        hrp.Velocity = Vector3.zero
+                        hrp.RotVelocity = Vector3.zero
+                    end)
+                end
+                -- если слишком много подряд — респавн
+                if invalidCount >= MAX_INVALID then
+                    invalidCount = 0
+                    pcall(function()
+                        local h = c:FindFirstChildOfClass("Humanoid")
+                        if h then h.Health = 0 end
+                    end)
+                    print("[AntiPos] force respawn — too many invalid positions")
+                end
+            end
+        end
+    end)
+
+    -- ловим телепорт в невалидную позицию при получении урона (anti-fling)
+    local lastGoodCF = nil
+    RunService.Heartbeat:Connect(function()
+        if not (registry.antivoid and registry.antivoid.get()) then return end
+        local c = LP.Character
+        if not c then return end
+        local hrp = c:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        if isValidCFrame(hrp.CFrame) then
+            lastGoodCF = hrp.CFrame
+        end
+    end)
+
+    print("[AntiPos] loaded — invalid position guard")
+
+    -- ==================== TRADE HELPER V2 ====================
+    -- таблица цен (локальная, обновляй руками или через API)
+    local PRICES = {
+        -- Chroma
+        ["chroma darkbringer"] = 12000, ["chroma lightbringer"] = 12000,
+        ["chroma gemstone"] = 9000, ["chroma deathshard"] = 8000,
+        ["chroma fang"] = 7500, ["chroma laser"] = 6500,
+        ["chroma saw"] = 6000, ["chroma seer"] = 5500,
+        ["chroma tides"] = 5000, ["chroma shark"] = 4500,
+        ["chroma slasher"] = 4000, ["chroma luger"] = 3800,
+        ["chroma heat"] = 3600, ["chroma gingerblade"] = 3400,
+        ["chroma tides"] = 3200, ["chroma constellation"] = 3000,
+        -- Godly
+        ["traveler's gun"] = 3000, ["traveler's knife"] = 3000,
+        ["gingerbread knife"] = 2500, ["sugar"] = 2200,
+        ["elderwood scythe"] = 2000, ["hallow's edge"] = 1800,
+        ["battleaxe"] = 1500, ["battleaxe ii"] = 1600,
+        ["vampire's axe"] = 1400, ["spider"] = 1200,
+        ["jingle gun"] = 1000, ["snowflake"] = 900,
+        ["gingerbread"] = 800, ["peppermint"] = 700,
+        ["logchopper"] = 650, ["gingermint"] = 600,
+        ["icebreaker"] = 550, ["icewing"] = 500,
+        ["ice dragon"] = 480, ["frostbite"] = 450,
+        ["ghostblade"] = 420, ["nebula"] = 400,
+        ["flames"] = 380, ["ripper"] = 350,
+        ["splitter"] = 330, ["seer"] = 300,
+        ["deathshard"] = 280, ["tides"] = 260,
+        ["shark"] = 240, ["slasher"] = 220,
+        ["laser"] = 200, ["fang"] = 180,
+        ["saw"] = 160, ["gemstone"] = 140,
+        ["lightbringer"] = 130, ["darkbringer"] = 120,
+        ["snowcannon"] = 110, ["icepiercer"] = 100,
+        -- Ancient
+        ["swirly axe"] = 5000, ["icewing"] = 4800,
+        ["logchopper"] = 4500, ["icebreaker"] = 4200,
+        ["hallowscythe"] = 3800, ["elderwood scythe"] = 3500,
+        ["traveler's axe"] = 3200, ["vampire's axe"] = 3000,
+        ["iceblaster"] = 2800, ["peppermint"] = 2600,
+        -- Unique
+        ["corrupt"] = 8000, ["c deathshard"] = 7500,
+        -- Classic
+        ["default knife"] = 10, ["default gun"] = 10,
+    }
+
+    local function priceOf(name)
+        if not name then return 0 end
+        local key = name:lower():gsub("^%s+", ""):gsub("%s+$", "")
+        return PRICES[key] or 0
+    end
+
+    -- находим TradeGUI (у MM2 он в PlayerGui)
+    local function findTradeGUI()
+        local pg = LP:FindFirstChild("PlayerGui")
+        if not pg then return nil end
+        for _, d in pairs(pg:GetDescendants()) do
+            if d.Name == "TradeGUI" or d.Name == "Trade" or d.Name == "TradingGui" then
+                return d
+            end
+        end
+        return nil
+    end
+
+    -- собираем предметы из оффера (YourOffer / TheirOffer)
+    local function collectOffer(offerFolder)
+        local items = {}
+        if not offerFolder then return items end
+        -- ищем Container с ItemLabel'ами
+        for _, d in pairs(offerFolder:GetDescendants()) do
+            if d:IsA("TextLabel") and d.Name == "ItemName" then
+                items[#items+1] = d.Text
+            elseif d:IsA("ImageLabel") and d.Name == "ItemImage" then
+                -- fallback: имя из ToolTip или соседнего TextLabel
+                local parent = d.Parent
+                if parent then
+                    local lbl = parent:FindFirstChild("ItemName")
+                    if lbl then items[#items+1] = lbl.Text end
+                end
+            end
+        end
+        return items
+    end
+
+    -- UI в Player tab (или Setting)
+    local TPlayer = nil
+    for _, t in pairs(tabs) do
+        if t.name == "player" then TPlayer = t; break end
+    end
+    if not TPlayer then
+        TPlayer = makeTab("player")
+    end
+
+    local function head2(parent, txt)
+        return n("TextLabel",{
+            Parent=parent, BackgroundTransparency=1,
+            Size=UDim2.new(1,-12,0,22), Font=Enum.Font.GothamBold,
+            Text=txt, TextColor3=COL.titleText, TextSize=13,
+            TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7,
+        })
+    end
+
+    head2(TPlayer.page, "─ TRADE HELPER V2 ─")
+
+    -- статус трейда
+    local statusLbl = n("TextLabel",{
+        Parent=TPlayer.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+        Size=UDim2.new(1,-12,0,50), Font=Enum.Font.GothamBold,
+        Text="no trade open", TextColor3=COL.tabText, TextSize=13,
+        TextXAlignment=Enum.TextXAlignment.Left, ZIndex=6,
+    })
+    n("UICorner",{CornerRadius=UDim.new(0,6),Parent=statusLbl})
+    n("UIPadding",{Parent=statusLbl,PaddingLeft=UDim.new(0,10)})
+
+    -- детали
+    local detailLbl = n("TextLabel",{
+        Parent=TPlayer.page, BackgroundTransparency=1,
+        Size=UDim2.new(1,-12,0,120), Font=Enum.Font.Code,
+        Text="", TextColor3=COL.tabText, TextSize=11,
+        TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Top,
+        TextWrapped=true, ZIndex=6,
+    })
+
+    -- вердикт
+    local verdictLbl = n("TextLabel",{
+        Parent=TPlayer.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+        Size=UDim2.new(1,-12,0,40), Font=Enum.Font.GothamBold,
+        Text="—", TextColor3=COL.titleText, TextSize=18,
+        ZIndex=6,
+    })
+    n("UICorner",{CornerRadius=UDim.new(0,6),Parent=verdictLbl})
+
+    task.spawn(function()
+        while task.wait(0.5) do
+            local tradeGui = findTradeGUI()
+            if not tradeGui or not tradeGui.Visible then
+                statusLbl.Text = "no trade open"
+                statusLbl.TextColor3 = COL.tabText
+                verdictLbl.Text = "—"
+                verdictLbl.BackgroundColor3 = COL.btn
+                detailLbl.Text = ""
+                continue
+            end
+
+            -- ищем YourOffer / TheirOffer
+            local yourOffer = tradeGui:FindFirstChild("YourOffer", true)
+            local theirOffer = tradeGui:FindFirstChild("TheirOffer", true)
+            if not yourOffer or not theirOffer then
+                statusLbl.Text = "trade open, but offers not found"
+                continue
+            end
+
+            local myItems = collectOffer(yourOffer)
+            local theirItems = collectOffer(theirOffer)
+
+            local myTotal, theirTotal = 0, 0
+            local myLines, theirLines = {}, {}
+
+            for _, nm in ipairs(myItems) do
+                local v = priceOf(nm)
+                myTotal = myTotal + v
+                myLines[#myLines+1] = string.format("%-25s %6d", nm, v)
+            end
+            for _, nm in ipairs(theirItems) do
+                local v = priceOf(nm)
+                theirTotal = theirTotal + v
+                theirLines[#theirLines+1] = string.format("%-25s %6d", nm, v)
+            end
+
+            -- вердикт
+            local col, tag
+            if myTotal == 0 or theirTotal == 0 then
+                col, tag = Color3.fromRGB(180,180,180), "?"
+            else
+                local ratio = theirTotal / myTotal
+                if ratio >= 1.15 then col, tag = Color3.fromRGB(80,220,120), "WIN"
+                elseif ratio <= 0.85 then col, tag = Color3.fromRGB(220,80,80), "LOSS"
+                else col, tag = Color3.fromRGB(255,200,80), "FAIR" end
+            end
+
+            statusLbl.Text = string.format("Yours: %d | Theirs: %d", myTotal, theirTotal)
+            verdictLbl.Text = tag
+            verdictLbl.TextColor3 = col
+            verdictLbl.BackgroundColor3 = col:Lerp(Color3.new(1,1,1), 0.85)
+
+            local lines = {"YOURS:", "  (empty)"}
+            if #myLines > 0 then lines = {"YOURS:"}; for _, l in ipairs(myLines) do lines[#lines+1] = "  "..l end end
+            lines[#lines+1] = ""
+            lines[#lines+1] = "THEIRS:"
+            if #theirLines > 0 then for _, l in ipairs(theirLines) do lines[#lines+1] = "  "..l end
+            else lines[#lines+1] = "  (empty)" end
+            detailLbl.Text = table.concat(lines, "\n")
+        end
+    end)
+
+    -- кнопка копирования сводки
+    makeRealBtn(TPlayer.page, "Copy Trade Summary", function()
+        local tradeGui = findTradeGUI()
+        if not tradeGui or not tradeGui.Visible then
+            print("[Trade] no trade open")
+            return
+        end
+        local yourOffer = tradeGui:FindFirstChild("YourOffer", true)
+        local theirOffer = tradeGui:FindFirstChild("TheirOffer", true)
+        if not yourOffer or not theirOffer then return end
+        local myItems = collectOffer(yourOffer)
+        local theirItems = collectOffer(theirOffer)
+        local myT, theirT = 0, 0
+        for _, nm in ipairs(myItems) do myT = myT + priceOf(nm) end
+        for _, nm in ipairs(theirItems) do theirT = theirT + priceOf(nm) end
+        local txt = string.format("Me: %d | Them: %d | Diff: %+d", myT, theirT, theirT - myT)
+        if setclipboard then setclipboard(txt) end
+        print("[Trade] "..txt)
+    end)
+
+    -- кнопка обновления цен (если хочешь через API)
+    makeRealBtn(TPlayer.page, "Refresh Prices (manual)", function()
+        print("[Trade] prices are local — edit PRICES table to update")
+    end)
+
+    print("[TradeV2] loaded — invalid position guard + trade helper")
+end
+-- ==================== END ANTI POS + TRADE V2 ====================
 print("[Godlike MM2] Kiti Cube Edition loaded.")
+-- language: Lua, file: godlike_aimlock_v2.lua, runtime: Roblox Executor, deps: none
+-- *watch for: MM2 gun стреляет по направлению Mouse.Hit — крутим камеру + MouseBehavior*
+-- *watch for: если Gun требует Raycast, "100% точность" = подмена Target на Head + Fire*
+-- *watch for: murderer для убийства — нож, для остальных — Gun; подставляем нужный Tool*
+
+-- ==================== AIMLOCK V2 + PVP BUTTON ====================
+do
+    if getgenv().GodlikeAimV2_loaded then
+        print("[AimV2] already loaded")
+        return
+    end
+    getgenv().GodlikeAimV2_loaded = true
+
+    local UIS = game:GetService("UserInputService")
+    local WS  = game:GetService("Workspace")
+
+    local function safeChar() local c = LP.Character; return c and c.Parent and c or nil end
+    local function safeRoot() local c = safeChar(); return c and c:FindFirstChild("HumanoidRootPart") end
+    local function safeHum()  local c = safeChar(); return c and c:FindFirstChildOfClass("Humanoid") end
+
+    -- ==================== ПОИСК ЦЕЛИ ПО РОЛИ ====================
+    local function getTarget()
+        local me = myRole and myRole() or getRole(LP)
+        -- murderer -> sheriff/innocent, остальные -> murderer
+        if me == "MURDERER" then
+            return getNearest(function(p)
+                return p ~= LP and not isWL(p) and getRole(p) ~= "MURDERER" and p.Character
+            end)
+        else
+            return getNearest(function(p)
+                return p ~= LP and not isWL(p) and getRole(p) == "MURDERER" and p.Character
+            end)
+        end
+    end
+
+    -- ==================== НАВОДКА + ВЫСТРЕЛ ====================
+    -- наводим камеру точно в голову цели и стреляем
+    local function aimAndShoot(target)
+        if not target or not target.Character then return false end
+        local head = target.Character:FindFirstChild("Head")
+        local hrp  = target.Character:FindFirstChild("HumanoidRootPart")
+        if not head or not hrp then return false end
+
+        local myRoot = safeRoot()
+        if not myRoot then return false end
+
+        -- цель = голова (100% попадание)
+        local targetPos = head.Position
+
+        -- крутим камеру в голову
+        local cam = WS.CurrentCamera
+        if cam then
+            cam.CFrame = CFrame.new(cam.CFrame.Position, targetPos)
+        end
+
+        -- крутим HRP (на случай если игра стреляет из HRP)
+        myRoot.CFrame = CFrame.new(myRoot.Position, targetPos)
+
+        -- находим нужный Tool
+        local me = myRole and myRole() or getRole(LP)
+        local tool
+        if me == "MURDERER" then
+            tool = findWeapon and findWeapon("knife") or nil
+        else
+            tool = findWeapon and findWeapon("gun") or nil
+        end
+        if not tool then
+            tool = findWeapon and findWeapon("any") or nil
+        end
+        if not tool then return false end
+
+        -- экипируем
+        local c = safeChar()
+        local h = safeHum()
+        if h and tool.Parent ~= c then
+            pcall(function() h:EquipTool(tool) end)
+            task.wait(0.05)
+        end
+
+        -- активируем (стреляет/бьёт)
+        pcall(function() tool:Activate() end)
+        return true
+    end
+
+    -- ==================== AIM LOCK (непрерывно) ====================
+    -- переопределяем старый тоггл aim_lock
+    local origAimLock = registry.aim_lock
+    if origAimLock and origAimLock.set then
+        local state = origAimLock.get()
+        registry.aim_lock.set = function(v)
+            origAimLock.set(v)
+            if v then
+                task.spawn(function()
+                    while registry.aim_lock.get() do
+                        task.wait(0.03)
+                        local target = getTarget()
+                        if target and target.Character then
+                            local head = target.Character:FindFirstChild("Head")
+                            if head then
+                                local cam = WS.CurrentCamera
+                                if cam then
+                                    cam.CFrame = CFrame.new(cam.CFrame.Position, head.Position)
+                                end
+                            end
+                        end
+                    end
+                end)
+            end
+        end
+        if state then registry.aim_lock.set(true) end
+    end
+
+    -- ==================== AUTO SHOOT + AIM (совмещённый) ====================
+    -- новый тоггл "Aim + Shoot (100%)"
+    makeToggle(T.Pvp.page, "Aim + Shoot (100%)", "aim_shoot", false, function(v)
+        if v then
+            task.spawn(function()
+                while registry.aim_shoot and registry.aim_shoot.get() do
+                    task.wait(0.1)
+                    local target = getTarget()
+                    if target then
+                        pcall(function() aimAndShoot(target) end)
+                    end
+                end
+            end)
+        end
+    end)
+
+    -- ==================== PVP KILL BUTTON (на экране) ====================
+    -- кнопка появляется поверх экрана в PVP вкладке
+    local KillBtn = n("TextButton",{
+        Parent=GUI, BackgroundColor3=Color3.fromRGB(200,55,55),
+        BackgroundTransparency=0.1, BorderSizePixel=0,
+        Position=UDim2.new(0.5,-60,0.85,0), Size=UDim2.new(0,120,0,50),
+        Font=Enum.Font.GothamBold, Text="KILL MURDERER",
+        TextColor3=Color3.fromRGB(255,255,255), TextSize=15,
+        AutoButtonColor=false, ZIndex=500, Visible=false,
+    })
+    n("UICorner",{CornerRadius=UDim.new(0,10),Parent=KillBtn})
+    n("UIStroke",{Color=Color3.fromRGB(255,255,255),Thickness=2,Transparency=0.3,Parent=KillBtn})
+
+    KillBtn.Activated:Connect(function()
+        local target = getTarget()
+        if not target then
+            print("[AimV2] no target found")
+            return
+        end
+        -- серия выстрелов с наводкой
+        for i = 1, 5 do
+            pcall(function() aimAndShoot(target) end)
+            task.wait(0.05)
+        end
+        print("[AimV2] fired 5 shots at "..target.Name)
+    end)
+
+    -- показывать кнопку только в PVP вкладке
+    local TPVP = nil
+    for _, t in pairs(tabs) do
+        if t.name == "pvp" then TPVP = t; break end
+    end
+    if TPVP then
+        -- слушаем переключение вкладок
+        task.spawn(function()
+            while task.wait(0.3) do
+                KillBtn.Visible = TPVP.page.Visible
+            end
+        end)
+    end
+
+    -- ==================== SETTING: точность ====================
+    makeSlider(T.Pvp.page, "Aim Precision (1=head, 2=body)", "aim_prec", 1, 3, 1, function() end)
+
+    -- ==================== экспорт ====================
+    getgenv().GodlikeAimV2 = {
+        aimAndShoot = aimAndShoot,
+        getTarget = getTarget,
+    }
+
+    print("[AimV2] loaded — aimlock, auto shoot, pvp button")
+end
+-- ==================== END AIM V2 ====================
 
