@@ -3073,5 +3073,73 @@ do
     print("[Godlike] sharp corners applied")
 end
 -- ==================== END SHARP ====================
+-- language: Lua, file: godlike_corners_toggle.lua, runtime: Roblox Executor, deps: none
+-- *watch for: ставится в конец, после всех элементов GUI*
+-- *watch for: DescendantAdded ловит новые — переключение работает динамически*
+
+-- ==================== CORNER CONTROL ====================
+do
+    local sharp = false      -- текущее состояние: false = скруглённые, true = острые
+    local ROUND_R = 10       -- радиус скругления
+
+    local function apply(inst)
+        if inst:IsA("UICorner") then
+            inst.CornerRadius = sharp and UDim.new(0, 0) or UDim.new(0, ROUND_R)
+        end
+    end
+
+    local function applyAll()
+        for _, d in pairs(GUI:GetDescendants()) do apply(d) end
+        if CubeFrame then
+            local c = CubeFrame:FindFirstChildOfClass("UICorner")
+            if c then c.CornerRadius = sharp and UDim.new(0, 0) or UDim.new(0, 12) end
+        end
+    end
+
+    -- ловим новые элементы
+    GUI.DescendantAdded:Connect(apply)
+
+    -- стартовое состояние
+    applyAll()
+
+    -- ==================== UI в Setting ====================
+    local headLbl = n("TextLabel",{
+        Parent=T.Setting.page, BackgroundTransparency=1,
+        Size=UDim2.new(1,-12,0,22), Font=Enum.Font.GothamBold,
+        Text="─ CORNERS ─", TextColor3=COL.titleText, TextSize=13,
+        TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7,
+    })
+
+    local function cornerBtn(label, mode)
+        local b = n("TextButton",{
+            Parent=T.Setting.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+            Size=UDim2.new(1,-12,0,32), Font=Enum.Font.GothamBold, Text=label,
+            TextColor3=COL.tabText, TextSize=13,
+            TextXAlignment=Enum.TextXAlignment.Left,
+            AutoButtonColor=false, ZIndex=6,
+        })
+        n("UICorner",{CornerRadius=UDim.new(0,6),Parent=b})
+        n("UIPadding",{Parent=b,PaddingLeft=UDim.new(0,12)})
+        b.Activated:Connect(function()
+            sharp = (mode == "sharp")
+            applyAll()
+            print("[Godlike] corners → " .. (sharp and "sharp" or "rounded"))
+        end)
+        return b
+    end
+
+    cornerBtn("● Rounded corners",  "round")
+    cornerBtn("■ Sharp corners",    "sharp")
+
+    -- экспорт
+    getgenv().GodlikeCorners = {
+        setSharp   = function() sharp = true;  applyAll() end,
+        setRound   = function(r) sharp = false; ROUND_R = r or 10; applyAll() end,
+        isSharp    = function() return sharp end,
+    }
+
+    print("[Godlike] corners control loaded (round by default)")
+end
+-- ==================== END CORNER CONTROL ====================
 print("[Godlike MM2] Kiti Cube Edition loaded.")
 
