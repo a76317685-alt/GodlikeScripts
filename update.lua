@@ -2370,4 +2370,663 @@ do
     print("[Godlike] Visual+ / Menu+ loaded")
 end
 -- ==================== END VISUAL+ / MENU+ ====================
+-- language: Lua, file: godlike_extras.lua, runtime: Roblox Executor, deps: none
+-- *watch for: Sky/Atmosphere могут быть заняты Visual+ блоком — здесь только Wings/Trail/Aura*
+-- *watch for: loadstring из текстбокса — проверь что URL не пустой перед вызовом*
+
+-- ==================== EXTRAS TAB ====================
+-- вставляется после Visual+/Menu+ блока, до print("[Godlike MM2] ...")
+
+do
+    -- ==================== УБИРАЕМ УГЛЫ (глобально) ====================
+    local function sharpCorners(root)
+        for _, d in pairs(root:GetDescendants()) do
+            if d:IsA("UICorner") then
+                d.CornerRadius = UDim.new(0, 0)
+            end
+        end
+    end
+    sharpCorners(GUI)
+    if CubeFrame then sharpCorners(CubeFrame) end
+    -- кнопка в меню — вернуть углы (если захочешь обратно)
+    getgenv().GodlikeCorners = {
+        sharp = function() sharpCorners(GUI) end,
+        round = function(r)
+            for _, d in pairs(GUI:GetDescendants()) do
+                if d:IsA("UICorner") then d.CornerRadius = UDim.new(0, r or 10) end
+            end
+        end,
+    }
+
+    -- ==================== НОВАЯ ВКЛАДКА ====================
+    local TExtras = makeTab("extras")
+
+    -- ==================== УЗОРЫ / ПАТТЕРНЫ ====================
+    local function makePattern(parent, kind)
+        -- узор = фрейм с градиентом и сеткой линий
+        local holder = n("Frame",{
+            Parent=parent, BackgroundColor3=Color3.fromRGB(15,15,15),
+            BackgroundTransparency=0.15, BorderSizePixel=0,
+            Size=UDim2.new(1,-12,0,80), ZIndex=5,
+        })
+
+        if kind == "grid" then
+            local steps = 8
+            for i=1,steps do
+                n("Frame",{
+                    Parent=holder, BackgroundColor3=Color3.fromRGB(60,110,220),
+                    BackgroundTransparency=0.75, BorderSizePixel=0,
+                    Position=UDim2.new(i/steps,0,0,0), Size=UDim2.new(0,1,1,0), ZIndex=6,
+                })
+                n("Frame",{
+                    Parent=holder, BackgroundColor3=Color3.fromRGB(60,110,220),
+                    BackgroundTransparency=0.75, BorderSizePixel=0,
+                    Position=UDim2.new(0,0,i/steps,0), Size=UDim2.new(1,0,0,1), ZIndex=6,
+                })
+            end
+        elseif kind == "diag" then
+            local N = 10
+            for i=1,N do
+                local line = n("Frame",{
+                    Parent=holder, BackgroundColor3=Color3.fromRGB(180,120,255),
+                    BackgroundTransparency=0.8, BorderSizePixel=0,
+                    Position=UDim2.new(i/N - 0.5,0,0,0),
+                    Size=UDim2.new(0,2,2,0),
+                    Rotation=45, ZIndex=6,
+                })
+            end
+        elseif kind == "dots" then
+            local rows, cols = 4, 12
+            for r=1,rows do
+                for c=1,cols do
+                    n("Frame",{
+                        Parent=holder, BackgroundColor3=Color3.fromRGB(80,220,140),
+                        BorderSizePixel=0,
+                        Position=UDim2.new(c/cols,0,r/rows,0),
+                        Size=UDim2.new(0,3,0,3),
+                        ZIndex=6,
+                    })
+                end
+            end
+        elseif kind == "waves" then
+            for i=1,6 do
+                n("Frame",{
+                    Parent=holder, BackgroundColor3=Color3.fromRGB(255,180,60),
+                    BackgroundTransparency=0.6,
+                    BorderSizePixel=0,
+                    Position=UDim2.new(0,0,i*0.15,0),
+                    Size=UDim2.new(1,0,0,2),
+                    ZIndex=6,
+                })
+            end
+        elseif kind == "hex" then
+            -- простая имитация "сот"
+            for r=0,3 do
+                for c=0,7 do
+                    local off = (r%2==0) and 0 or 0.5
+                    n("Frame",{
+                        Parent=holder, BackgroundColor3=Color3.fromRGB(120,180,255),
+                        BackgroundTransparency=0.7, BorderSizePixel=0,
+                        Position=UDim2.new((c+off)/8,0,r/4,0),
+                        Size=UDim2.new(0,8,0,8),
+                        ZIndex=6,
+                    })
+                end
+            end
+        end
+        return holder
+    end
+
+    local function head(parent, txt)
+        return n("TextLabel",{
+            Parent=parent, BackgroundTransparency=1,
+            Size=UDim2.new(1,-12,0,22), Font=Enum.Font.GothamBold,
+            Text=txt, TextColor3=COL.titleText, TextSize=13,
+            TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7,
+        })
+    end
+
+    head(TExtras.page, "─ PATTERNS ─")
+    local patternHolder = n("Frame",{
+        Parent=TExtras.page, BackgroundTransparency=1,
+        Size=UDim2.new(1,-12,0,80), ZIndex=5,
+    })
+    local currentPattern
+    local function setPattern(kind)
+        if currentPattern then currentPattern:Destroy() end
+        currentPattern = makePattern(patternHolder, kind)
+    end
+
+    local function patBtn(label, kind)
+        local b = n("TextButton",{
+            Parent=TExtras.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+            Size=UDim2.new(1,-12,0,30), Font=Enum.Font.GothamBold, Text=label,
+            TextColor3=COL.tabText, TextSize=13, TextXAlignment=Enum.TextXAlignment.Left,
+            AutoButtonColor=false, ZIndex=6,
+        })
+        n("UIPadding",{Parent=b,PaddingLeft=UDim.new(0,12)})
+        b.Activated:Connect(function() setPattern(kind) end)
+        return b
+    end
+    patBtn("Grid",     "grid")
+    patBtn("Diagonal", "diag")
+    patBtn("Dots",     "dots")
+    patBtn("Waves",    "waves")
+    patBtn("Hex",      "hex")
+
+    -- ==================== ЗАГРУЗКА ТЕКСТА / ССЫЛКИ ====================
+    head(TExtras.page, "─ LOAD SCRIPT ─")
+
+    local loadBox = n("TextBox",{
+        Parent=TExtras.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+        Size=UDim2.new(1,-12,0,60), Font=Enum.Font.Code, Text="",
+        PlaceholderText="paste URL or lua code...", TextColor3=COL.tabText,
+        PlaceholderColor3=Color3.fromRGB(140,140,140), TextSize=12,
+        ClearTextOnFocus=false, MultiLine=true, ZIndex=6,
+    })
+    n("UIPadding",{Parent=loadBox,PaddingLeft=UDim.new(0,10),PaddingRight=UDim.new(0,10),PaddingTop=UDim.new(0,6),PaddingBottom=UDim.new(0,6)})
+
+    local loadBtn = n("TextButton",{
+        Parent=TExtras.page, BackgroundColor3=Color3.fromRGB(35,140,70), BorderSizePixel=0,
+        Size=UDim2.new(1,-12,0,38), Font=Enum.Font.GothamBold,
+        Text="▶ Execute", TextColor3=Color3.fromRGB(255,255,255), TextSize=15,
+        AutoButtonColor=false, ZIndex=6,
+    })
+
+    loadBtn.Activated:Connect(function()
+        local txt = loadBox.Text
+        if txt == "" then
+            print("[Godlike] empty input")
+            return
+        end
+        local isUrl = txt:match("^https?://")
+        local code = txt
+        if isUrl then
+            local ok, body = pcall(function() return game:HttpGet(txt) end)
+            if not ok or not body then
+                print("[Godlike] fetch failed: "..txt)
+                return
+            end
+            code = body
+        end
+        local ok, err = pcall(function()
+            local fn = loadstring(code)
+            if fn then fn() end
+        end)
+        print(ok and "[Godlike] executed" or ("[Godlike] error: "..tostring(err)))
+    end)
+
+    local clearBtn = n("TextButton",{
+        Parent=TExtras.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+        Size=UDim2.new(1,-12,0,30), Font=Enum.Font.GothamBold,
+        Text="✕ Clear", TextColor3=Color3.fromRGB(200,60,60), TextSize=13,
+        TextXAlignment=Enum.TextXAlignment.Left, AutoButtonColor=false, ZIndex=6,
+    })
+    n("UIPadding",{Parent=clearBtn,PaddingLeft=UDim.new(0,12)})
+    clearBtn.Activated:Connect(function() loadBox.Text = "" end)
+
+    -- ==================== КРЫЛЬЯ (лёгкая версия) ====================
+    head(TExtras.page, "─ WINGS ─")
+
+    local wingModel = nil
+    local wingColor1 = Color3.fromRGB(180,220,255)
+    local wingColor2 = Color3.fromRGB(80,140,255)
+
+    local function destroyWings()
+        if wingModel and wingModel.Parent then wingModel:Destroy() end
+        wingModel = nil
+        if LP.Character then
+            local old = LP.Character:FindFirstChild("G_Wings")
+            if old then old:Destroy() end
+        end
+    end
+
+    local function buildWings()
+        destroyWings()
+        local c = LP.Character
+        if not c then return end
+        local rootPart = c:FindFirstChild("HumanoidRootPart")
+        if not rootPart then return end
+
+        local model = n("Model",{Name="G_Wings",Parent=c})
+        local function feather(side, idx, ofsY, ofsZ, scale)
+            local part = n("Part",{
+                Name = "W_"..side.."_"..idx,
+                Size = Vector3.new(scale, scale*0.35, 0.15),
+                Anchored = false, CanCollide = false, Massless = true,
+                Material = Enum.Material.Neon,
+                Color = wingColor1,
+                Parent = model,
+            })
+            local weld = n("Weld",{Parent=part})
+            weld.Part0 = rootPart
+            weld.Part1 = part
+            weld.C0 = CFrame.new(side * (1.4 + idx*0.35), 0.3 + ofsY, -0.6 + ofsZ)
+                * CFrame.Angles(0, math.rad(side * (10 + idx*4)), math.rad(side * -15))
+            if idx % 2 == 0 then
+                n("PointLight",{Color=wingColor2,Range=5,Brightness=1.2,Parent=part})
+            end
+        end
+        for i=0,3 do
+            feather(1,  i, -i*0.25, i*0.1, 1.6 - i*0.25)
+            feather(-1, i, -i*0.25, i*0.1, 1.6 - i*0.25)
+        end
+        wingModel = model
+    end
+
+    makeToggle(TExtras.page, "Wings", "ext_wings", false, function(v)
+        if v then buildWings() else destroyWings() end
+    end)
+    LP.CharacterAdded:Connect(function()
+        wingModel = nil
+        if registry.ext_wings and registry.ext_wings.get() then
+            task.wait(0.5); buildWings()
+        end
+    end)
+    makeSlider(TExtras.page, "Wing Hue 1", "ext_wing_h1", 0, 360, 210, function(v)
+        wingColor1 = Color3.fromHSV(v/360, 0.3, 1)
+        if wingModel then
+            for _, p in pairs(wingModel:GetChildren()) do
+                if p:IsA("BasePart") then p.Color = wingColor1 end
+            end
+        end
+    end)
+    makeSlider(TExtras.page, "Wing Hue 2", "ext_wing_h2", 0, 360, 220, function(v)
+        wingColor2 = Color3.fromHSV(v/360, 0.9, 1)
+        if wingModel then
+            for _, p in pairs(wingModel:GetChildren()) do
+                if p:IsA("BasePart") then
+                    local l = p:FindFirstChildOfClass("PointLight")
+                    if l then l.Color = wingColor2 end
+                end
+            end
+        end
+    end)
+
+    -- ==================== TRAIL (след за персонажем) ====================
+    head(TExtras.page, "─ TRAIL ─")
+
+    local trailAttachments = nil
+    local trail = nil
+
+    local function destroyTrail()
+        if trail and trail.Parent then trail:Destroy() end
+        if trailAttachments then
+            for _, a in ipairs(trailAttachments) do
+                if a and a.Parent then a:Destroy() end
+            end
+            trailAttachments = nil
+        end
+        trail = nil
+    end
+
+    local function buildTrail()
+        destroyTrail()
+        local c = LP.Character
+        if not c then return end
+        local rootPart = c:FindFirstChild("HumanoidRootPart")
+        if not rootPart then return end
+        trailAttachments = {
+            n("Attachment",{Name="G_TrailA",Position=Vector3.new(0.5,0,0),Parent=rootPart}),
+            n("Attachment",{Name="G_TrailB",Position=Vector3.new(-0.5,0,0),Parent=rootPart}),
+        }
+        trail = n("Trail",{
+            Name = "G_Trail",
+            Attachment0 = trailAttachments[1],
+            Attachment1 = trailAttachments[2],
+            Color = ColorSequence.new(Color3.fromRGB(120,180,255), Color3.fromRGB(80,220,255)),
+            Transparency = NumberSequence.new(0, 1),
+            Lifetime = 1.2,
+            MinLength = 0.2,
+            FaceCamera = true,
+            LightEmission = 1,
+            Parent = rootPart,
+        })
+    end
+
+    makeToggle(TExtras.page, "Trail", "ext_trail", false, function(v)
+        if v then buildTrail() else destroyTrail() end
+    end)
+    LP.CharacterAdded:Connect(function()
+        if registry.ext_trail and registry.ext_trail.get() then
+            task.wait(0.5); buildTrail()
+        end
+    end)
+
+    -- ==================== AURA (свечение вокруг игрока) ====================
+    head(TExtras.page, "─ AURA ─")
+
+    local aura = nil
+    local function destroyAura()
+        if aura then
+            if aura.Parent then aura:Destroy() end
+            aura = nil
+        end
+    end
+    local function buildAura()
+        destroyAura()
+        local c = LP.Character
+        if not c then return end
+        aura = n("Highlight",{
+            Name = "G_Aura",
+            Adornee = c,
+            FillColor = Color3.fromRGB(120,180,255),
+            FillTransparency = 0.7,
+            OutlineColor = Color3.fromRGB(255,255,255),
+            OutlineTransparency = 0.3,
+            DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
+            Parent = c,
+        })
+    end
+    makeToggle(TExtras.page, "Aura", "ext_aura", false, function(v)
+        if v then buildAura() else destroyAura() end
+    end)
+
+    -- ==================== экспорт ====================
+    getgenv().GodlikeExtras = {
+        setPattern = setPattern,
+        buildWings = buildWings,
+        destroyWings = destroyWings,
+        buildTrail = buildTrail,
+        destroyTrail = destroyTrail,
+        buildAura = buildAura,
+        destroyAura = destroyAura,
+        sharp = getgenv().GodlikeCorners.sharp,
+    }
+
+    print("[Godlike] Extras loaded")
+end
+-- language: Lua, file: godlike_avatar_player.lua, runtime: Roblox Executor, deps: none
+-- *watch for: аватарка — ImageLabel, нужен asset id картинки; если нет — заглушка с "K"*
+-- *watch for: wallbang работает только если игра сама рейкастит; чисто визуально через aim-target сквозь объекты*
+-- *watch for: kill murderer — телепорт+активейт, работает не в anti-cheat серверах*
+
+-- ==================== AVATAR + PLAYER TAB + WALLBANG ====================
+-- вставляется после Extras, до print("[Godlike MM2] ...")
+
+do
+    -- ==================== АВАТАР KITI ====================
+    -- картинку можешь заменить своим asset id
+    local KITI_IMAGE = "rbxassetid://123475161"  -- ← сюда свой asset id, если есть
+
+    local avatarFrame = n("Frame",{
+        Parent=GUI, BackgroundColor3=Color3.fromRGB(10,10,10),
+        BackgroundTransparency=0.1, BorderSizePixel=0,
+        Position=UDim2.new(0,10,0,52), Size=UDim2.new(0,52,0,52),
+        ZIndex=300,
+    })
+    local avatarStroke = n("UIStroke",{
+        Color=Color3.fromRGB(60,110,220), Thickness=2, Parent=avatarFrame,
+    })
+
+    if KITI_IMAGE ~= "rbxassetid://0" then
+        local img = n("ImageLabel",{
+            Parent=avatarFrame, BackgroundTransparency=1,
+            Size=UDim2.fromScale(1,1), Image=KITI_IMAGE,
+            ScaleType=Enum.ScaleType.Crop, ZIndex=301,
+        })
+    else
+        -- fallback: буква K
+        n("TextLabel",{
+            Parent=avatarFrame, BackgroundTransparency=1, Size=UDim2.fromScale(1,1),
+            Font=Enum.Font.GothamBold, Text="K", TextColor3=Color3.fromRGB(60,110,220),
+            TextSize=24, ZIndex=301,
+        })
+    end
+
+    -- пульсация stroke
+    task.spawn(function()
+        while avatarFrame.Parent do
+            task.wait(0.05)
+            local t = tick() % 2
+            local a = 0.3 + math.abs(math.sin(t*math.pi)) * 0.7
+            if avatarStroke then
+                avatarStroke.Transparency = 1 - a
+                avatarStroke.Color = Color3.fromHSV((tick()*0.1)%1, 0.6, 1)
+            end
+        end
+    end)
+
+    -- тащим за аватар
+    local avDrag, avStart, avPos
+    avatarFrame.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            avDrag = true; avStart = i.Position; avPos = avatarFrame.Position
+        end
+    end)
+    UIS.InputChanged:Connect(function(i)
+        if avDrag and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+            local d = i.Position - avStart
+            avatarFrame.Position = UDim2.new(avPos.X.Scale, avPos.X.Offset + d.X, avPos.Y.Scale, avPos.Y.Offset + d.Y)
+        end
+    end)
+    UIS.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            avDrag = false
+        end
+    end)
+
+    -- ==================== PLAYER TAB ====================
+    local TPlayer = makeTab("player")
+
+    local function head2(parent, txt)
+        return n("TextLabel",{
+            Parent=parent, BackgroundTransparency=1,
+            Size=UDim2.new(1,-12,0,22), Font=Enum.Font.GothamBold,
+            Text=txt, TextColor3=COL.titleText, TextSize=13,
+            TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7,
+        })
+    end
+
+    head2(TPlayer.page, "─ PLAYERS ─")
+
+    local listBox = n("ScrollingFrame",{
+        Parent=TPlayer.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+        Size=UDim2.new(1,-12,0,260), ScrollBarThickness=4,
+        CanvasSize=UDim2.new(0,0,0,0), AutomaticCanvasSize=Enum.AutomaticSize.Y,
+        ZIndex=6,
+    })
+    n("UIListLayout",{Parent=listBox,Padding=UDim.new(0,4),SortOrder=Enum.SortOrder.LayoutOrder})
+    n("UIPadding",{Parent=listBox,PaddingTop=UDim.new(0,6),PaddingBottom=UDim.new(0,6),PaddingLeft=UDim.new(0,6),PaddingRight=UDim.new(0,6)})
+
+    local playerRows = {}
+    local selectedPlayer = nil
+
+    local ROLE_COLOR = {
+        MURDERER = Color3.fromRGB(200,55,55),
+        SHERIFF  = Color3.fromRGB(60,120,255),
+        INNOCENT = Color3.fromRGB(35,140,70),
+        ARMED    = Color3.fromRGB(255,180,60),
+        UNKNOWN  = Color3.fromRGB(150,150,150),
+    }
+
+    local function refreshPlayers()
+        for _, r in pairs(playerRows) do r:Destroy() end
+        playerRows = {}
+
+        local order = 1
+        for _, p in pairs(Players:GetPlayers()) do
+            if p == LP then continue end
+            local role = getRole(p)
+            local rc = ROLE_COLOR[role] or Color3.fromRGB(150,150,150)
+
+            local row = n("TextButton",{
+                Parent=listBox, BackgroundColor3=Color3.fromRGB(245,245,245),
+                BorderSizePixel=0, Size=UDim2.new(1,-12,0,32),
+                Font=Enum.Font.GothamBold, Text=p.Name.."  ["..role.."]",
+                TextColor3=rc, TextSize=12,
+                TextXAlignment=Enum.TextXAlignment.Left,
+                AutoButtonColor=false, LayoutOrder=order, ZIndex=7,
+            })
+            n("UIPadding",{Parent=row,PaddingLeft=UDim.new(0,10)})
+            order = order + 1
+
+            row.Activated:Connect(function()
+                selectedPlayer = p
+                for _, r in pairs(playerRows) do
+                    if r:IsA("TextButton") then
+                        r.BackgroundColor3 = Color3.fromRGB(245,245,245)
+                    end
+                end
+                row.BackgroundColor3 = Color3.fromRGB(200,220,255)
+            end)
+
+            playerRows[#playerRows+1] = row
+        end
+    end
+    refreshPlayers()
+    Players.PlayerAdded:Connect(refreshPlayers)
+    Players.PlayerRemoving:Connect(function() task.wait(0.1); refreshPlayers() end)
+
+    local refreshBtn = n("TextButton",{
+        Parent=TPlayer.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+        Size=UDim2.new(1,-12,0,30), Font=Enum.Font.GothamBold,
+        Text="↻ Refresh", TextColor3=COL.tabText, TextSize=13,
+        TextXAlignment=Enum.TextXAlignment.Left, AutoButtonColor=false, ZIndex=6,
+    })
+    n("UIPadding",{Parent=refreshBtn,PaddingLeft=UDim.new(0,12)})
+    refreshBtn.Activated:Connect(refreshPlayers)
+
+    head2(TPlayer.page, "─ ACTIONS ─")
+
+    makeRealBtn(TPlayer.page, "Kill Selected", function()
+        if not selectedPlayer then print("[Godlike] no player selected"); return end
+        local t = selectedPlayer
+        if not t.Character or not t.Character:FindFirstChild("HumanoidRootPart") then return end
+        local role = getRole(t)
+        local isMurdererTarget = (role == "MURDERER")
+
+        -- если убиваем мурдера — берём Gun, иначе Knife
+        local toolName = isMurdererTarget and "Gun" or "Knife"
+        local tool = char():FindFirstChild(toolName) or LP.Backpack:FindFirstChild(toolName)
+        if not tool then
+            print("[Godlike] no "..toolName.." available")
+            return
+        end
+        pcall(function()
+            if char():FindFirstChild(toolName) ~= tool then hum():EquipTool(tool) end
+            root().CFrame = CFrame.new(root().Position, t.Character.HumanoidRootPart.Position)
+            task.wait(0.05)
+            tool:Activate()
+        end)
+        print("[Godlike] kill attempt → "..t.Name.." ("..role..")")
+    end)
+
+    makeToggle(TPlayer.page, "Kill Murderer (auto)", "kill_murd", false, function(v)
+        if v then
+            task.spawn(function()
+                while registry.kill_murd and registry.kill_murd.get() do
+                    task.wait(0.4)
+                    local t = getNearest(isMurderer)
+                    if t and t.Character and root() then
+                        local g = char():FindFirstChild("Gun") or LP.Backpack:FindFirstChild("Gun")
+                        if g then
+                            pcall(function()
+                                if char():FindFirstChild("Gun") ~= g then hum():EquipTool(g) end
+                                root().CFrame = CFrame.new(root().Position, t.Character.HumanoidRootPart.Position)
+                                task.wait(0.03)
+                                g:Activate()
+                            end)
+                        end
+                    end
+                end
+            end)
+        end
+    end)
+
+    head2(TPlayer.page, "─ AIM LOCK ─")
+
+    local aimTarget = nil
+    makeToggle(TPlayer.page, "Aim Lock (selected)", "aim_lock", false, function(v)
+        if v then
+            task.spawn(function()
+                while registry.aim_lock and registry.aim_lock.get() do
+                    task.wait(0.05)
+                    local t = selectedPlayer or getNearest(isMurderer)
+                    if t and t.Character then
+                        local hrp = t.Character:FindFirstChild("HumanoidRootPart")
+                        local head = t.Character:FindFirstChild("Head")
+                        local target = head or hrp
+                        if target and root() and WS.CurrentCamera then
+                            -- плавный поворот камеры к цели
+                            local cam = WS.CurrentCamera
+                            local myPos = cam.CFrame.Position
+                            cam.CFrame = CFrame.new(myPos, target.Position)
+                        end
+                    end
+                end
+            end)
+        end
+    end)
+
+    makeSlider(TPlayer.page, "Aim Lock FOV", "aim_lock_fov", 30, 400, 120, function() end)
+    makeToggle(TPlayer.page, "Aim Lock Nearest Murderer", "aim_lock_murd", false, function(v) end)
+
+    head2(TPlayer.page, "─ INFO ─")
+    local infoLbl = n("TextLabel",{
+        Parent=TPlayer.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+        Size=UDim2.new(1,-12,0,60), Font=Enum.Font.Code,
+        Text="selected: none", TextColor3=COL.tabText, TextSize=12,
+        TextXAlignment=Enum.TextXAlignment.Left, TextWrapped=true, ZIndex=6,
+    })
+    n("UIPadding",{Parent=infoLbl,PaddingLeft=UDim.new(0,10),PaddingTop=UDim.new(0,6)})
+
+    task.spawn(function()
+        while task.wait(0.5) do
+            if selectedPlayer then
+                local role = getRole(selectedPlayer)
+                local hp = selectedPlayer.Character and selectedPlayer.Character:FindFirstChildOfClass("Humanoid")
+                infoLbl.Text = string.format(
+                    "name: %s\nrole: %s\nhp: %d",
+                    selectedPlayer.Name, role, hp and math.floor(hp.Health) or 0
+                )
+            else
+                infoLbl.Text = "selected: none"
+            end
+        end
+    end)
+
+    -- ==================== WALLBANG (в combat) ====================
+    -- добавляем в существующую вкладку combat
+    makeToggle(T.Combat.page, "Shoot Through Walls", "wallbang", false)
+
+    -- логика: если wallbang on — ищем цель сквозь стены и шлём Activate без raycast-проверки
+    task.spawn(function()
+        while task.wait(0.2) do
+            if not (registry.wallbang and registry.wallbang.get()) then continue end
+            local c = LP.Character
+            if not c then continue end
+            local tool = c:FindFirstChildOfClass("Tool")
+            if not tool then continue end
+            if not (tool.Name:lower():find("gun") or tool.Name:lower():find("pistol") or tool.Name:lower():find("revolver")) then continue end
+
+            -- цель — ближайший мурдер или игрок (если aim_lock)
+            local target = selectedPlayer or getNearest(isMurderer)
+            if target and target.Character and target.Character:FindFirstChild("Head") then
+                pcall(function()
+                    -- поворот к цели и выстрел
+                    if root() then
+                        root().CFrame = CFrame.new(root().Position, target.Character.Head.Position)
+                    end
+                    if WS.CurrentCamera then
+                        WS.CurrentCamera.CFrame = CFrame.new(WS.CurrentCamera.CFrame.Position, target.Character.Head.Position)
+                    end
+                    tool:Activate()
+                end)
+            end
+        end
+    end)
+
+    -- ==================== экспорт ====================
+    getgenv().GodlikePlayer = {
+        refresh = refreshPlayers,
+        select = function(p) selectedPlayer = p; refreshPlayers() end,
+        getSelected = function() return selectedPlayer end,
+        avatar = avatarFrame,
+    }
+
+    print("[Godlike] Avatar + Player tab + Wallbang loaded")
+end
+-- ==================== END AVATAR + PLAYER + WALLBANG ====================
 print("[Godlike MM2] Kiti Cube Edition loaded.")
+
