@@ -1,5 +1,5 @@
 -- language: Lua, file: godlike_mm2.lua, runtime: Roblox Executor
--- name: Godlike MM2 | Kiti Cube Edition
+-- name: Godlike MM2 | Kiti Cube Editio
 
 local Players    = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -3028,5 +3028,50 @@ do
     print("[Godlike] Avatar + Player tab + Wallbang loaded")
 end
 -- ==================== END AVATAR + PLAYER + WALLBANG ====================
+-- language: Lua, file: godlike_sharp.lua, runtime: Roblox Executor, deps: none
+-- *watch for: блок ставится ПОСЛЕ создания GUI, до print("[Godlike MM2] ...")*
+-- *watch for: если что-то создаётся после — DescendantAdded хук добивает автоматически*
+
+-- ==================== SHARP CORNERS ====================
+do
+    local function killCorner(inst)
+        if inst:IsA("UICorner") then
+            inst.CornerRadius = UDim.new(0, 0)
+        end
+    end
+
+    -- 1) пройтись по всему что уже есть
+    for _, d in pairs(GUI:GetDescendants()) do
+        killCorner(d)
+    end
+    if CubeFrame then
+        for _, d in pairs(CubeFrame:GetDescendants()) do
+            killCorner(d)
+        end
+        local c = CubeFrame:FindFirstChildOfClass("UICorner")
+        if c then c.CornerRadius = UDim.new(0, 0) end
+    end
+
+    -- 2) ловить новые
+    GUI.DescendantAdded:Connect(killCorner)
+    if CubeFrame then
+        CubeFrame.DescendantAdded:Connect(killCorner)
+    end
+
+    -- 3) экспорт — если захочешь вернуть
+    getgenv().GodlikeCorners = {
+        sharp = function(r)
+            for _, d in pairs(GUI:GetDescendants()) do
+                if d:IsA("UICorner") then d.CornerRadius = UDim.new(0, r or 0) end
+            end
+        end,
+        hook = function()
+            GUI.DescendantAdded:Connect(killCorner)
+        end,
+    }
+
+    print("[Godlike] sharp corners applied")
+end
+-- ==================== END SHARP ====================
 print("[Godlike MM2] Kiti Cube Edition loaded.")
 
