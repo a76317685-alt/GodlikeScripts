@@ -3141,5 +3141,159 @@ do
     print("[Godlike] corners control loaded (round by default)")
 end
 -- ==================== END CORNER CONTROL ====================
+-- language: Lua, file: godlike_persist.lua, runtime: Roblox Executor, deps: none
+-- *watch for: CharacterAdded стреляет при каждом респавне — не плодим дубли через флаги*
+-- *watch for: Save/Load конфигов должны покрывать все ключи registry, включая новые*
+
+-- ==================== PERSISTENCE BLOCK ====================
+-- вставляется ПОСЛЕ всех блоков (после skinchanger), до print("[Godlike MM2] ...")
+
+do
+    -- === 1) автосохранение при каждом изменении registry ===
+    local AUTOSAVE_PATH = "godlike/autosave.json"
+    local autosaveQueued = false
+    local lastSaveTick = 0
+
+    local function autosave()
+        if not (writefile and HS) then return end
+        -- троттлинг: не чаще раза в секунду
+        if tick() - lastSaveTick < 1 then
+            if autosaveQueued then return end
+            autosaveQueued = true
+            task.delay(1, function()
+                autosaveQueued = false
+                autosave()
+            end)
+            return
+        end
+        lastSaveTick = tick()
+        local dump = {}
+        for k, v in pairs(registry) do
+            pcall(function() dump[k] = v.get() end)
+        end
+        pcall(function()
+            if not isfolder("godlike") then makefolder("godlike") end
+            writefile(AUTOSAVE_PATH, HS:JSONEncode(dump))
+        end)
+    end
+
+    -- патчим registry.set чтобы любой тоггл/слайдер сохранялся автоматом
+    local originalSets = {}
+    for key, entry in pairs(registry) do
+        if entry.set and not originalSets[key] then
+            local origSet = entry.set
+            originalSets[key] = origSet
+            entry.set = function(v)
+                local ok, err = pcall(origSet, v)
+                autosave()
+                return ok, err
+            end
+        end
+    end
+
+    -- === 2) авто-загрузка при старте ===
+    local function autoload()
+        if not (readfile and isfile and HS) then return end
+        if not isfile(AUTOSAVE_PATH) then return end
+        local ok, data = pcall(function()
+            return HS:JSONDecode(readfile(AUTOSAVE_PATH))
+        end)
+        if not ok or type(data) ~= "table" then return end
+        for k, v in pairs(data) do
+            if registry[k] and registry[k].set then
+                pcall(function() registry[k].set(v) end)
+            end
+        end
+        print("[Persist] autoloaded "..AUTOSAVE_PATH)
+    end
+
+    -- === 3) перевешивание визуалов после респавна ===
+    local reapplyMap = {
+        -- функции которые надо вызвать заново (все визуалы на персонаже)
+        "wings",        -- Visual+ wings
+        "ext_wings",    -- Extras wings
+        "ext_trail",    -- Extras trail
+        "ext_aura",     -- Extras aura
+        "hitbox",       -- Combat hitbox (на других, но не сломается)
+        "god",
+        "noclip",
+        "fly",
+        "ghost",
+        "hide",
+    }
+
+    local function reapplyAll()
+        for _, key in ipairs(reapplyMap) do
+            local entry = registry[key]
+            if entry and entry.get and entry.set then
+                local state = entry.get()
+                if state then
+                    -- выключить и включить заново = перевесить инстансы
+                    pcall(function() entry.set(false) end)
+                    task.wait(0.05)
+                    pcall(function() entry.set(state) end)
+                end
+            end
+        end
+        -- hub badge / tag (из Secret Status Block)
+        if registry.hub_tag and registry.hub_tag.get() then
+            pcall(function() registry.hub_tag.set(false) end)
+            task.wait(0.05)
+            pcall(function() registry.hub_tag.set(true) end)
+        end
+        -- настройки меню (shape / pen / lang) — они живут на GUI, не на персонаже,
+        -- но если GUI пересоздался — восстанавливаем
+        local skin = getgenv().GodlikeSkin
+        if skin and skin.currentPalette then
+            pcall(function() skin.apply(skin.currentPalette) end)
+        end
+    end
+
+    -- === 4) хук на респавн ===
+    local respawnDebounce = false
+    LP.CharacterAdded:Connect(function()
+        if respawnDebounce then return end
+        respawnDebounce = true
+        task.delay(1.2, function() respawnDebounce = false end) -- ждём пока персонаж прогрузится
+        task.wait(0.6)
+        print("[Persist] reapplying after respawn...")
+        reapplyAll()
+    end)
+
+    -- === 5) хуки на глобальные визуальные вещи (Sky / Lighting / Shirt) ===
+    -- Sky и Atmosphere живут в Lighting — при респавне не удаляются, но некоторые игры пересоздают Lighting
+    local function reapplyLighting()
+        local skyState = getgenv().GodlikeSky
+        if skyState and skyState.apply then
+            pcall(function() skyState.apply(skyState.current) end)
+        end
+        -- форс переприменения тогглов света
+        for _, key in ipairs({"fb","nofog","night","lowg","alag","aflash"}) do
+            local entry = registry[key]
+            if entry and entry.get and entry.get() then
+                pcall(function() entry.set(true) end)
+            end
+        end
+    end
+    task.spawn(function()
+        while task.wait(2) do
+            -- раз в 2 сек — лёгкий чек, чтобы не жрать perf
+            reapplyLighting()
+        end
+    end)
+
+    -- === 6) экспорт для ручного вызова ===
+    getgenv().GodlikePersist = {
+        save   = autosave,
+        load   = autoload,
+        reapply = reapplyAll,
+    }
+
+    -- === 7) авто-загрузка СЕЙЧАС ===
+    task.delay(0.5, autoload)
+
+    print("[Persist] loaded — autosave + reapply on respawn")
+end
+-- ==================== END PERSISTENCE ====================
 print("[Godlike MM2] Kiti Cube Edition loaded.")
 
