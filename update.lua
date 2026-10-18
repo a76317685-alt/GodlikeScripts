@@ -3295,5 +3295,353 @@ do
     print("[Persist] loaded — autosave + reapply on respawn")
 end
 -- ==================== END PERSISTENCE ====================
+-- language: Lua, file: godlike_fix_all.lua, runtime: Roblox Executor, deps: none
+-- *watch for: ставится ПОСЛЕ avatar_player, ДО persist*
+-- *watch for: в godlike_mm2.lua замени `local function getRole` и `local function isMurderer` на глобальные*
+
+-- ==================== GODLIKE FIX ALL ====================
+do
+    if getgenv().GodlikeFixAll_loaded then
+        print("[Fix] already loaded, skip")
+        return
+    end
+    getgenv().GodlikeFixAll_loaded = true
+
+    -- ==================== SAFE HELPERS ====================
+    local function safeChar()
+        local c = LP.Character
+        if c and c.Parent then return c end
+        return nil
+    end
+    local function safeRoot()
+        local c = safeChar()
+        if not c then return nil end
+        return c:FindFirstChild("HumanoidRootPart")
+    end
+    local function safeHum()
+        local c = safeChar()
+        if not c then return nil end
+        return c:FindFirstChildOfClass("Humanoid")
+    end
+    _G.char = safeChar
+    _G.root = safeRoot
+    _G.hum  = safeHum
+
+    -- ==================== WEAPONS ====================
+    local MURDERER_TOOLS = {"Knife", "Dagger", "MurdererKnife", "Assassin"}
+    local SHERIFF_TOOLS  = {"Gun", "Revolver", "Pistol", "SheriffGun", "Magnum"}
+
+    local function hasTool(p, list)
+        if not p or not p.Character then return false end
+        local c, bp = p.Character, p:FindFirstChild("Backpack")
+        for _, nm in ipairs(list) do
+            if c:FindFirstChild(nm) then return true end
+            if bp and bp:FindFirstChild(nm) then return true end
+        end
+        return false
+    end
+
+    local function isGunTool(t)
+        local n = t.Name:lower()
+        return n:find("gun") or n:find("pistol") or n:find("revolver")
+            or n:find("sheriff") or n:find("shoot") or n:find("rifle")
+    end
+    local function isKnifeTool(t)
+        local n = t.Name:lower()
+        return n:find("knife") or n:find("dagger") or n:find("blade")
+            or n:find("murderer")
+    end
+    local function findWeapon(kind)
+        local c = safeChar()
+        if not c then return nil end
+        local bp = LP:FindFirstChild("Backpack")
+
+        local function ok(t)
+            if not t:IsA("Tool") then return false end
+            if kind == "any"   then return true end
+            if kind == "gun"   then return isGunTool(t) end
+            if kind == "knife" then return isKnifeTool(t) end
+            return false
+        end
+
+        for _, t in pairs(c:GetChildren()) do if ok(t) then return t end end
+        if bp then
+            for _, t in pairs(bp:GetChildren()) do if ok(t) then return t end end
+        end
+        return nil
+    end
+    _G.findWeapon = findWeapon
+
+    -- ==================== ROLE DETECTION ====================
+    -- раунд идёт если у кого-то есть оружие в руках или backpack
+    local function roundStarted()
+        for _, p in ipairs(Players:GetPlayers()) do
+            if hasTool(p, MURDERER_TOOLS) or hasTool(p, SHERIFF_TOOLS) then
+                return true
+            end
+        end
+        return false
+    end
+    _G.roundStarted = roundStarted
+
+    local function detectRole(p)
+        if not p then return "UNKNOWN" end
+        if hasTool(p, MURDERER_TOOLS) then return "MURDERER" end
+        if hasTool(p, SHERIFF_TOOLS)  then return "SHERIFF"  end
+        local c = p.Character
+        if c then
+            for _, obj in ipairs(c:GetChildren()) do
+                if obj:IsA("Tool") then return "ARMED" end
+            end
+        end
+        return "INNOCENT"
+    end
+
+    -- глобальный getRole перезаписываем
+    function getRole(p)
+        if not roundStarted() then return "LOBBY" end
+        return detectRole(p or LP)
+    end
+    function isMurderer(p)
+        if not roundStarted() then return false end
+        return detectRole(p or LP) == "MURDERER"
+    end
+
+    _G.myRole = function() return getRole(LP) end
+    _G.pickTarget = function()
+        local me = myRole()
+        if me == "MURDERER" then
+            return getNearest(function(p)
+                return p ~= LP and not isWL(p) and getRole(p) ~= "MURDERER"
+            end)
+        else
+            return getNearest(function(p)
+                return p ~= LP and not isWL(p) and getRole(p) == "MURDERER"
+            end)
+        end
+    end
+
+    -- цвета и иконки для LOBBY
+    if _G.COL then _G.COL.lobby = Color3.fromRGB(150,150,180) end
+    if _G.ROLE_COLOR then _G.ROLE_COLOR.LOBBY = Color3.fromRGB(150,150,180) end
+
+    -- ==================== ROUND-STATE WATCHER ====================
+    -- при смене LOBBY <-> STARTED сбрасываем ESP и tags
+    task.spawn(function()
+        local prev = nil
+        while task.wait(0.5) do
+            local started = roundStarted()
+            if started ~= prev then
+                prev = started
+                print("[Fix] round → " .. (started and "STARTED" or "LOBBY"))
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p.Character then
+                        local esp  = p.Character:FindFirstChild("G_ESP");  if esp  then esp:Destroy()  end
+                        local tags = p.Character:FindFirstChild("G_Tags"); if tags then tags:Destroy() end
+                    end
+                end
+            end
+        end
+    end)
+
+    -- ==================== OVERRIDE: AUTO SHOOT ====================
+    local origAutoshoot = registry.autoshoot
+    if origAutoshoot and origAutoshoot.set then
+        local state = origAutoshoot.get()
+        registry.autoshoot.set = function(v)
+            origAutoshoot.set(v)
+            if v then
+                task.spawn(function()
+                    while registry.autoshoot.get() do
+                        task.wait(math.max(registry.sdelay.get(), 30) / 1000)
+                        local root = safeRoot()
+                        if not root then task.wait(0.3); continue end
+                        local tool = findWeapon("any")
+                        if not tool then continue end
+                        local t = pickTarget()
+                        if t and t.Character and t.Character:FindFirstChild("HumanoidRootPart") then
+                            pcall(function()
+                                local h = safeHum()
+                                if h and tool.Parent ~= safeChar() then h:EquipTool(tool) end
+                                root.CFrame = CFrame.new(root.Position, t.Character.HumanoidRootPart.Position)
+                                task.wait(0.02)
+                                tool:Activate()
+                            end)
+                        end
+                    end
+                end)
+            end
+        end
+        if state then registry.autoshoot.set(true) end
+    end
+
+    -- ==================== OVERRIDE: KILL MURDERER ====================
+    local origKill = registry.kill_murd
+    if origKill and origKill.set then
+        local state = origKill.get()
+        registry.kill_murd.set = function(v)
+            origKill.set(v)
+            if v then
+                task.spawn(function()
+                    while registry.kill_murd.get() do
+                        task.wait(0.4)
+                        local root = safeRoot()
+                        if not root then task.wait(0.5); continue end
+                        local t = pickTarget()
+                        if t and t.Character and t.Character:FindFirstChild("HumanoidRootPart") then
+                            local tool = findWeapon("any")
+                            if tool then
+                                pcall(function()
+                                    local h = safeHum()
+                                    if h and tool.Parent ~= safeChar() then h:EquipTool(tool) end
+                                    root.CFrame = CFrame.new(root.Position, t.Character.HumanoidRootPart.Position)
+                                    task.wait(0.05)
+                                    tool:Activate()
+                                end)
+                            end
+                        end
+                    end
+                end)
+            end
+        end
+        if state then registry.kill_murd.set(true) end
+    end
+
+    -- ==================== OVERRIDE: AUTO STAB ====================
+    local origStab = registry.autostab
+    if origStab and origStab.set then
+        local state = origStab.get()
+        registry.autostab.set = function(v)
+            origStab.set(v)
+            if v then
+                task.spawn(function()
+                    while registry.autostab.get() do
+                        task.wait(0.4)
+                        local root = safeRoot()
+                        if not root then task.wait(0.3); continue end
+                        local tool = findWeapon("knife") or findWeapon("any")
+                        if not tool then continue end
+                        local t = pickTarget()
+                        if t and t.Character and t.Character:FindFirstChild("HumanoidRootPart") then
+                            local d = (root.Position - t.Character.HumanoidRootPart.Position).Magnitude
+                            if d < (registry.srange and registry.srange.get() or 8) then
+                                pcall(function()
+                                    local h = safeHum()
+                                    if h and tool.Parent ~= safeChar() then h:EquipTool(tool) end
+                                    root.CFrame = CFrame.new(root.Position, t.Character.HumanoidRootPart.Position)
+                                    task.wait(0.05)
+                                    tool:Activate()
+                                end)
+                            end
+                        end
+                    end
+                end)
+            end
+        end
+        if state then registry.autostab.set(true) end
+    end
+
+    -- ==================== KILL AURA ====================
+    task.spawn(function()
+        while task.wait(0.25) do
+            if not (registry.kaura and registry.kaura.get()) then continue end
+            local c = safeChar(); if not c then continue end
+            local root = safeRoot(); if not root then continue end
+            local tool = findWeapon("any"); if not tool then continue end
+            local range = (registry.arange and registry.arange.get()) or 8
+            for _, p in pairs(Players:GetPlayers()) do
+                if p ~= LP and p.Character and not isWL(p) then
+                    local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp and (root.Position - hrp.Position).Magnitude < range then
+                        pcall(function()
+                            local h = safeHum()
+                            if h and tool.Parent ~= c then h:EquipTool(tool) end
+                            root.CFrame = CFrame.new(root.Position, hrp.Position)
+                            task.wait(0.03)
+                            tool:Activate()
+                        end)
+                    end
+                end
+            end
+        end
+    end)
+
+    -- ==================== AUTO EQUIP BY ROLE ====================
+    local function autoEquipRole()
+        if not (registry.auto_equip and registry.auto_equip.get()) then return end
+        if not roundStarted() then return end
+        local c = safeChar(); if not c then return end
+        local h = safeHum();  if not h then return end
+        local r = myRole()
+        local tool
+        if r == "MURDERER" then tool = findWeapon("knife")
+        elseif r == "SHERIFF" then tool = findWeapon("gun") end
+        if tool and tool.Parent ~= c then
+            pcall(function() h:EquipTool(tool) end)
+        end
+    end
+    task.spawn(function()
+        while task.wait(1) do pcall(autoEquipRole) end
+    end)
+
+    -- ==================== REAPPLY VISUALS AFTER RESPAWN ====================
+    local reapplyTargets = {
+        "wings", "ext_wings", "ext_trail", "ext_aura",
+        "god", "noclip", "fly", "ghost", "hide", "hub_tag",
+    }
+    local function reapplyVisuals()
+        for _, key in ipairs(reapplyTargets) do
+            local entry = registry[key]
+            if entry and entry.get and entry.set and entry.get() then
+                pcall(function() entry.set(false) end)
+                task.wait(0.05)
+                pcall(function() entry.set(true) end)
+            end
+        end
+        if registry.wings and registry.wings.get() then
+            if getgenv().GodlikeVisualMenu and getgenv().GodlikeVisualMenu.buildWings then
+                pcall(getgenv().GodlikeVisualMenu.buildWings)
+            end
+        end
+        if registry.ext_wings and registry.ext_wings.get() then
+            if getgenv().GodlikeExtras and getgenv().GodlikeExtras.buildWings then
+                pcall(getgenv().GodlikeExtras.buildWings)
+            end
+        end
+        if registry.ext_trail and registry.ext_trail.get() then
+            if getgenv().GodlikeExtras and getgenv().GodlikeExtras.buildTrail then
+                pcall(getgenv().GodlikeExtras.buildTrail)
+            end
+        end
+        if registry.ext_aura and registry.ext_aura.get() then
+            if getgenv().GodlikeExtras and getgenv().GodlikeExtras.buildAura then
+                pcall(getgenv().GodlikeExtras.buildAura)
+            end
+        end
+    end
+    _G.GodlikeReapply = reapplyVisuals
+
+    local respawnGuard = false
+    LP.CharacterAdded:Connect(function()
+        if respawnGuard then return end
+        respawnGuard = true
+        task.wait(1.2)
+        respawnGuard = false
+        pcall(reapplyVisuals)
+        task.wait(0.3)
+        pcall(autoEquipRole)
+        print("[Fix] after respawn: visuals + weapon re-equipped")
+    end)
+
+    if LP.Character then
+        task.delay(1, function()
+            pcall(reapplyVisuals)
+            pcall(autoEquipRole)
+        end)
+    end
+
+    print("[Fix] all loaded — tools, murderer, respawn, lobby roles")
+end
+-- ==================== END GODLIKE FIX ALL ====================
 print("[Godlike MM2] Kiti Cube Edition loaded.")
 
