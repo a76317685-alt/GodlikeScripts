@@ -539,3 +539,255 @@ do
     print("[MiniHub] loaded — 20 functions ready")
 end
 -- ==================== END MINI HUB ====================
+-- language: Lua, file: godlike_flyfarm_fix.lua, runtime: Roblox Executor, deps: none
+-- *watch for: PlatformStand = true — Humanoid не мешает физике, BV работает*
+-- *watch for: Anchored = false — если HRP заякорен, BV не двигает*
+-- *watch for: проверка что flyState.bv.Parent — если персонаж респавнился, BV исчез*
+
+-- ==================== FLY-FARM FIX (force move) ====================
+do
+    if getgenv().GodlikeFlyFix_loaded then
+        print("[FlyFix] already loaded")
+        return
+    end
+    getgenv().GodlikeFlyFix_loaded = true
+
+    local RunService = game:GetService("RunService")
+    local WS = game:GetService("Workspace")
+
+    local flyState = {
+        enabled = false,
+        speed = 60,
+        bv = nil, bg = nil, conn = nil,
+        mode = "both",
+    }
+
+    local function safeChar() local c = LP.Character; return c and c.Parent and c or nil end
+    local function safeRoot() local c = safeChar(); return c and c:FindFirstChild("HumanoidRootPart") end
+    local function safeHum() local c = safeChar(); return c and c:FindFirstChildOfClass("Humanoid") end
+
+    -- === кэш монет, обновляется раз в 1 сек (чтобы не лагало) ===
+    local coinCache = {}
+    local function refreshCache()
+        coinCache = {}
+        for _, o in ipairs(WS:GetDescendants()) do
+            if o:IsA("BasePart") then
+                local nm = o.Name:lower()
+                if nm:find("coin") or nm:find("candy") or nm:find("sweet") or nm:find("treat") then
+                    coinCache[#coinCache+1] = o
+                end
+            end
+        end
+    end
+    task.spawn(function()
+        while task.wait(1) do refreshCache() end
+    end)
+
+    local function findNearest()
+        local r = safeRoot()
+        if not r then return nil, math.huge end
+        local best, bd = nil, math.huge
+        for _, o in ipairs(coinCache) do
+            if o and o.Parent then
+                local nm = o.Name:lower()
+                local isCoin = nm:find("coin")
+                local isCandy = nm:find("candy") or nm:find("sweet") or nm:find("treat")
+                local match = (flyState.mode == "coin" and isCoin)
+                    or (flyState.mode == "candy" and isCandy)
+                    or (flyState.mode == "both" and (isCoin or isCandy))
+                if match then
+                    local d = (r.Position - o.Position).Magnitude
+                    if d < bd then bd = d; best = o end
+                end
+            end
+        end
+        return best, bd
+    end
+
+    -- === запуск с проверками ===
+    local function start()
+        if flyState.enabled then return end
+        local r = safeRoot()
+        local h = safeHum()
+        if not r or not h then
+            warn("[FlyFix] no character — wait")
+            return
+        end
+
+        -- ФИКС 1: разякорить HRP если заякорен
+        if r.Anchored then r.Anchored = false end
+        -- ФИКС 2: PlatformStand = true, чтобы Humanoid не мешал
+        h.PlatformStand = true
+
+        flyState.enabled = true
+
+        -- создаём BV
+        flyState.bv = Instance.new("BodyVelocity")
+        flyState.bv.Name = "G_FlyFix_BV"
+        flyState.bv.Velocity = Vector3.zero
+        flyState.bv.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+        flyState.bv.P = 8000
+        flyState.bv.Parent = r
+
+        -- BG для стабилизации
+        flyState.bg = Instance.new("BodyGyro")
+        flyState.bg.Name = "G_FlyFix_BG"
+        flyState.bg.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
+        flyState.bg.P = 5000
+        flyState.bg.D = 500
+        flyState.bg.CFrame = r.CFrame
+        flyState.bg.Parent = r
+
+        -- noclip
+        local c = safeChar()
+        if c then
+            for _, p in ipairs(c:GetDescendants()) do
+                if p:IsA("BasePart") then
+                    p:SetAttribute("G_FlyFix_OrigCollide", p.CanCollide)
+                    p.CanCollide = false
+                end
+            end
+        end
+
+        -- цикл
+        flyState.conn = RunService.Heartbeat:Connect(function()
+            if not flyState.enabled then return end
+            local root = safeRoot()
+            if not root then return end
+            -- пересоздаём BV если пропал (респавн, что угодно)
+            if not flyState.bv or not flyState.bv.Parent then
+                flyState.bv = Instance.new("BodyVelocity")
+                flyState.bv.Name = "G_FlyFix_BV"
+                flyState.bv.MaxForce = Vector3.new(1e6,1e6,1e6)
+                flyState.bv.P = 8000
+                flyState.bv.Parent = root
+            end
+
+            local target, dist = findNearest()
+            if not target then
+                flyState.bv.Velocity = Vector3.zero
+                return
+            end
+
+            -- если близко — стоп + подбор
+            if dist < 5 then
+                flyState.bv.Velocity = Vector3.zero
+                pcall(function()
+                    if target:IsA("Tool") and target.Parent ~= LP.Backpack then
+                        target.Parent = LP.Backpack
+                    end
+                end)
+                return
+            end
+
+            -- полёт
+            local targetPos = target.Position + Vector3.new(0, 2, 0)
+            local delta = targetPos - root.Position
+            if delta.Magnitude > 0 then
+                local dir = delta.Unit
+                -- ФИКС 3: жёстко ставим скорость, без Lerp-тормозов
+                flyState.bv.Velocity = dir * flyState.speed
+                flyState.bg.CFrame = CFrame.lookAt(root.Position, targetPos)
+            end
+        end)
+
+        print("[FlyFix] started, mode="..flyState.mode..", speed="..flyState.speed)
+    end
+
+    local function stop()
+        flyState.enabled = false
+        if flyState.conn then flyState.conn:Disconnect(); flyState.conn = nil end
+        if flyState.bv then pcall(function() flyState.bv:Destroy() end); flyState.bv = nil end
+        if flyState.bg then pcall(function() flyState.bg:Destroy() end); flyState.bg = nil end
+        local h = safeHum()
+        if h then h.PlatformStand = false end
+        local c = safeChar()
+        if c then
+            for _, p in ipairs(c:GetDescendants()) do
+                if p:IsA("BasePart") then
+                    local orig = p:GetAttribute("G_FlyFix_OrigCollide")
+                    p.CanCollide = (orig ~= nil) and orig or true
+                    p:SetAttribute("G_FlyFix_OrigCollide", nil)
+                end
+            end
+        end
+        print("[FlyFix] stopped")
+    end
+
+    -- ==================== UI ====================
+    local TFly = makeTab("flyfix")
+
+    local function head(parent, txt)
+        return n("TextLabel",{
+            Parent=parent, BackgroundTransparency=1,
+            Size=UDim2.new(1,-12,0,22), Font=Enum.Font.GothamBold,
+            Text=txt, TextColor3=COL.titleText, TextSize=13,
+            TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7,
+        })
+    end
+
+    head(TFly.page, "─ FLY-FARM FIX (force move) ─")
+
+    makeToggle(TFly.page, "Fly to Coin/Candy", "flyfix_on", false, function(v)
+        if v then start() else stop() end
+    end)
+
+    local modeBtns = {}
+    local function modeBtn(label, value)
+        local b = n("TextButton",{
+            Parent=TFly.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+            Size=UDim2.new(1,-12,0,32), Font=Enum.Font.GothamBold,
+            Text=label, TextColor3=COL.tabText, TextSize=13,
+            TextXAlignment=Enum.TextXAlignment.Left, AutoButtonColor=false, ZIndex=6,
+        })
+        n("UICorner",{CornerRadius=UDim.new(0,6),Parent=b})
+        n("UIPadding",{Parent=b,PaddingLeft=UDim.new(0,12)})
+        b.Activated:Connect(function()
+            flyState.mode = value
+            for k, btn in pairs(modeBtns) do
+                btn.BackgroundColor3 = (k == value) and Color3.fromRGB(200,220,255) or COL.btn
+            end
+        end)
+        modeBtns[value] = b
+        return b
+    end
+    modeBtn("🍬 Candy", "candy")
+    modeBtn("🪙 Coin", "coin")
+    modeBtn("🎯 Both", "both")
+    task.delay(0.1, function()
+        for k, b in pairs(modeBtns) do
+            b.BackgroundColor3 = (k == flyState.mode) and Color3.fromRGB(200,220,255) or COL.btn
+        end
+    end)
+
+    makeSlider(TFly.page, "Speed", "flyfix_speed", 20, 200, 60, function(v)
+        flyState.speed = v
+    end)
+
+    head(TFly.page, "─ STATUS ─")
+    local statusLbl = n("TextLabel",{
+        Parent=TFly.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+        Size=UDim2.new(1,-12,0,60), Font=Enum.Font.Code,
+        Text="", TextColor3=COL.tabText, TextSize=11,
+        TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Top,
+        TextWrapped=true, ZIndex=6,
+    })
+    n("UIPadding",{Parent=statusLbl,PaddingLeft=UDim.new(0,10),PaddingTop=UDim.new(0,6)})
+
+    task.spawn(function()
+        while task.wait(0.4) do
+            local r = safeRoot()
+            local target, dist = findNearest()
+            statusLbl.Text = string.format(
+                "enabled: %s\nmode: %s\nspeed: %d\ncoins in cache: %d\ntarget dist: %s",
+                tostring(flyState.enabled), flyState.mode, flyState.speed,
+                #coinCache, target and math.floor(dist) or "—"
+            )
+        end
+    end)
+
+    getgenv().GodlikeFlyFix = {start=start, stop=stop, state=flyState}
+    print("[FlyFix] loaded")
+end
+-- ==================== END FLY-FIX ====================
+print("y")
