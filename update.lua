@@ -2747,7 +2747,7 @@ end
 do
     -- ==================== АВАТАР KITI ====================
     -- картинку можешь заменить своим asset id
-    local KITI_IMAGE = "rbxassetid://123475161"  -- ← сюда свой asset id, если есть
+    local KITI_IMAGE = "rbxassetid://6050149849"  -- ← сюда свой asset id, если есть
 
     local avatarFrame = n("Frame",{
         Parent=GUI, BackgroundColor3=Color3.fromRGB(10,10,10),
