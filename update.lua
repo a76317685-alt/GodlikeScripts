@@ -5853,5 +5853,719 @@ do
     end)
 end
 -- ==================== END COLOR + HALLOWEEN ====================
+-- language: Lua, file: godlike_menu_bg.lua, runtime: Roblox Executor, deps: none
+-- *watch for: ставится ПОСЛЕ godlike_mm2.lua, ПОСЛЕ color_halloween*
+-- *watch for: если Main не найден — блок откажется грузиться с понятной ошибкой*
+
+-- ==================== MENU BACKGROUND IMAGE ====================
+do
+    if getgenv().GodlikeMenuBg_loaded then
+        print("[MenuBg] already loaded")
+        return
+    end
+
+    -- guard
+    if not Main then
+        warn("[MenuBg] Main not found — block must be placed AFTER core GUI")
+        return
+    end
+
+    local IMAGE_ID = "rbxassetid://8956925462"
+
+    -- создаём ImageLabel под Main (первый child, низкий ZIndex)
+    local bg = n("ImageLabel",{
+        Name = "G_MenuBg",
+        Parent = Main,
+        BackgroundTransparency = 1,
+        Size = UDim2.fromScale(1, 1),
+        Image = IMAGE_ID,
+        ImageTransparency = 0.4,   -- прозрачность картинки
+        ScaleType = Enum.ScaleType.Crop,
+        ZIndex = 0,                -- позади всего
+    })
+    n("UICorner",{CornerRadius=UDim.new(0,10),Parent=bg})
+
+    -- если хочешь плавное затемнение сверху, чтобы текст читался
+    local overlay = n("Frame",{
+        Name = "G_MenuBgOverlay",
+        Parent = Main,
+        BackgroundColor3 = Color3.fromRGB(0,0,0),
+        BackgroundTransparency = 0.5,  -- 0.5 = половина прозрачности
+        BorderSizePixel = 0,
+        Size = UDim2.fromScale(1, 1),
+        ZIndex = 0,
+    })
+    n("UICorner",{CornerRadius=UDim.new(0,10),Parent=overlay})
+
+    -- слой для контента — чтобы был выше картинки, но ниже UI
+    -- если контент проваливается за картинку — подними ZIndex у Body/Side
+
+    getgenv().GodlikeMenuBg = {
+        image = bg,
+        overlay = overlay,
+        setImage = function(id, trans)
+            bg.Image = "rbxassetid://" .. tostring(id)
+            if trans then bg.ImageTransparency = trans end
+        end,
+        setTransparency = function(t)
+            bg.ImageTransparency = t
+        end,
+        setOverlay = function(t)
+            overlay.BackgroundTransparency = t
+        end,
+    }
+
+    getgenv().GodlikeMenuBg_loaded = true
+    print("[MenuBg] loaded — image " .. IMAGE_ID)
+end
+-- ==================== END MENU BACKGROUND ====================
+-- language: Lua, file: godlike_popup_hub.lua, runtime: Roblox Executor, deps: none
+-- *watch for: ставится в конец, после print("[Godlike MM2] ...") — не зависит от tabs*
+-- *watch for: отдельный ScreenGui, не конфликтует с основным меню*
+-- *watch for: 3 экрана переключаются кнопками сверху, каждый самодостаточен*
+
+-- ==================== POPUP HUB (3 SCREENS) ====================
+do
+    if getgenv().GodlikePopupHub_loaded then
+        print("[PopupHub] already loaded")
+        return
+    end
+    getgenv().GodlikePopupHub_loaded = true
+
+    local UIS = game:GetService("UserInputService")
+    local WS  = game:GetService("Workspace")
+
+    local function safeChar() local c = LP.Character; return c and c.Parent and c or nil end
+    local function safeRoot() local c = safeChar(); return c and c:FindFirstChild("HumanoidRootPart") end
+    local function safeTP(cf)  local r = safeRoot(); if r then r.CFrame = cf end end
+
+    local ACCENT = Color3.fromRGB(120, 160, 255)
+    local ACCENT_HW = Color3.fromRGB(255, 140, 40)
+
+    -- ==================== GUI ====================
+    local PopGui = n("ScreenGui",{
+        Name = "GodlikePopupHub",
+        ResetOnSpawn = false,
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+        Parent = CoreGui,
+    })
+
+    -- кнопка открытия
+    local OpenBtn = n("TextButton",{
+        Parent = PopGui,
+        BackgroundColor3 = ACCENT,
+        BackgroundTransparency = 0.1,
+        BorderSizePixel = 0,
+        Position = UDim2.new(1, -140, 1, -140),
+        Size = UDim2.new(0, 120, 0, 50),
+        Font = Enum.Font.GothamBold,
+        Text = "◈ GODLIKE",
+        TextColor3 = Color3.fromRGB(255,255,255),
+        TextSize = 14,
+        AutoButtonColor = false,
+        ZIndex = 500,
+    })
+    n("UICorner",{CornerRadius=UDim.new(0,10),Parent=OpenBtn})
+    n("UIStroke",{Color=Color3.fromRGB(255,255,255),Thickness=2,Transparency=0.4,Parent=OpenBtn})
+
+    -- основное окно
+    local Popup = n("Frame",{
+        Parent = PopGui,
+        BackgroundColor3 = Color3.fromRGB(15,15,20),
+        BackgroundTransparency = 0.05,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0.5, -220, 0.5, -240),
+        Size = UDim2.new(0, 440, 0, 480),
+        Visible = false,
+        Active = true,
+        ZIndex = 600,
+    })
+    n("UICorner",{CornerRadius=UDim.new(0,12),Parent=Popup})
+    n("UIStroke",{Color=ACCENT,Thickness=2,Parent=Popup})
+
+    -- топбар
+    local Top = n("Frame",{
+        Parent = Popup,
+        BackgroundColor3 = Color3.fromRGB(25,25,35),
+        BackgroundTransparency = 0.1,
+        BorderSizePixel = 0,
+        Size = UDim2.new(1,0,0,44),
+        Active = true,
+        ZIndex = 610,
+    })
+    n("UICorner",{CornerRadius=UDim.new(0,12),Parent=Top})
+
+    n("TextLabel",{
+        Parent = Top,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0,14,0,0),
+        Size = UDim2.new(1,-80,1,0),
+        Font = Enum.Font.GothamBold,
+        Text = "Godlike Hub",
+        TextColor3 = ACCENT,
+        TextSize = 18,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 611,
+    })
+
+    local CloseBtn = n("TextButton",{
+        Parent = Top,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(1,-40,0,10),
+        Size = UDim2.new(0,30,0,24),
+        Font = Enum.Font.GothamBold,
+        Text = "×",
+        TextColor3 = Color3.fromRGB(255,100,100),
+        TextSize = 22,
+        AutoButtonColor = false,
+        ZIndex = 611,
+    })
+    CloseBtn.Activated:Connect(function() Popup.Visible = false end)
+
+    -- панель вкладок (3 кнопки)
+    local TabBar = n("Frame",{
+        Parent = Popup,
+        BackgroundColor3 = Color3.fromRGB(25,25,35),
+        BackgroundTransparency = 0.4,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0,0,0,48),
+        Size = UDim2.new(1,0,0,36),
+        ZIndex = 610,
+    })
+    n("UIListLayout",{
+        Parent = TabBar,
+        FillDirection = Enum.FillDirection.Horizontal,
+        Padding = UDim.new(0,4),
+        HorizontalAlignment = Enum.HorizontalAlignment.Center,
+        VerticalAlignment = Enum.VerticalAlignment.Center,
+    })
+
+    -- контент холдер
+    local ContentHolder = n("Frame",{
+        Parent = Popup,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0,0,0,88),
+        Size = UDim2.new(1,0,1,-88),
+        ZIndex = 605,
+    })
+
+    -- 3 экрана
+    local Screens = {}
+
+    local function makeScreen(name)
+        local s = n("ScrollingFrame",{
+            Parent = ContentHolder,
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            Size = UDim2.new(1,0,1,0),
+            ScrollBarThickness = 4,
+            CanvasSize = UDim2.new(0,0,0,0),
+            AutomaticCanvasSize = Enum.AutomaticSize.Y,
+            ClipsDescendants = true,
+            Visible = false,
+            ZIndex = 605,
+        })
+        n("UIListLayout",{Parent=s,Padding=UDim.new(0,6),SortOrder=Enum.SortOrder.LayoutOrder})
+        n("UIPadding",{Parent=s,PaddingTop=UDim.new(0,10),PaddingBottom=UDim.new(0,10),
+            PaddingLeft=UDim.new(0,14),PaddingRight=UDim.new(0,14)})
+        Screens[name] = s
+        return s
+    end
+
+    local SHalloween = makeScreen("halloween")
+    local SColor     = makeScreen("color")
+    local SChangelog = makeScreen("changelog")
+
+    local activeScreen = nil
+    local tabButtons = {}
+
+    local function showScreen(name, accent)
+        for n2, s in pairs(Screens) do s.Visible = (n2 == name) end
+        activeScreen = name
+        for n2, b in pairs(tabButtons) do
+            if n2 == name then
+                b.BackgroundColor3 = accent or ACCENT
+                b.TextColor3 = Color3.fromRGB(255,255,255)
+            else
+                b.BackgroundColor3 = Color3.fromRGB(40,40,50)
+                b.TextColor3 = Color3.fromRGB(180,180,200)
+            end
+        end
+    end
+
+    -- кнопки вкладок
+    local function makeTabBtn(name, label, accent)
+        local b = n("TextButton",{
+            Parent = TabBar,
+            BackgroundColor3 = Color3.fromRGB(40,40,50),
+            BorderSizePixel = 0,
+            Size = UDim2.new(0, 128, 0, 28),
+            Font = Enum.Font.GothamBold,
+            Text = label,
+            TextColor3 = Color3.fromRGB(180,180,200),
+            TextSize = 13,
+            AutoButtonColor = false,
+            ZIndex = 611,
+        })
+        n("UICorner",{CornerRadius=UDim.new(0,6),Parent=b})
+        b.Activated:Connect(function() showScreen(name, accent) end)
+        tabButtons[name] = b
+        return b
+    end
+
+    makeTabBtn("halloween", "🎃 Halloween", ACCENT_HW)
+    makeTabBtn("color", "🎨 Color", ACCENT)
+    makeTabBtn("changelog", "📜 Changelog", ACCENT)
+
+    -- хелперы
+    local function head(parent, txt, color)
+        return n("TextLabel",{
+            Parent = parent, BackgroundTransparency = 1,
+            Size = UDim2.new(1,-12,0,22),
+            Font = Enum.Font.GothamBold,
+            Text = txt,
+            TextColor3 = color or ACCENT,
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 606,
+        })
+    end
+
+    local function toggleIn(parent, txt, key, default, cb, accent)
+        local state = default
+        local b = n("TextButton",{
+            Parent = parent,
+            BackgroundColor3 = Color3.fromRGB(40,40,50),
+            BorderSizePixel = 0,
+            Size = UDim2.new(1,-12,0,36),
+            Font = Enum.Font.GothamBold,
+            Text = txt,
+            TextColor3 = Color3.fromRGB(220,220,240),
+            TextSize = 14,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            AutoButtonColor = false,
+            ZIndex = 606,
+        })
+        n("UICorner",{CornerRadius=UDim.new(0,6),Parent=b})
+        n("UIPadding",{Parent=b,PaddingLeft=UDim.new(0,12)})
+        local ind = n("Frame",{
+            Parent = b,
+            BackgroundColor3 = state and (accent or ACCENT) or Color3.fromRGB(100,100,120),
+            BorderSizePixel = 0,
+            Position = UDim2.new(1,-30,0,10),
+            Size = UDim2.new(0,16,0,16),
+            ZIndex = 607,
+        })
+        n("UICorner",{CornerRadius=UDim.new(1,0),Parent=ind})
+        local function apply(v)
+            state = v
+            ind.BackgroundColor3 = v and (accent or ACCENT) or Color3.fromRGB(100,100,120)
+            if cb then cb(v) end
+        end
+        b.Activated:Connect(function() apply(not state) end)
+        registry[key] = {set=apply, get=function() return state end}
+        return b
+    end
+
+    local function buttonIn(parent, txt, cb, accent)
+        local b = n("TextButton",{
+            Parent = parent,
+            BackgroundColor3 = Color3.fromRGB(40,40,50),
+            BorderSizePixel = 0,
+            Size = UDim2.new(1,-12,0,34),
+            Font = Enum.Font.GothamBold,
+            Text = txt,
+            TextColor3 = Color3.fromRGB(220,220,240),
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            AutoButtonColor = false,
+            ZIndex = 606,
+        })
+        n("UICorner",{CornerRadius=UDim.new(0,6),Parent=b})
+        n("UIPadding",{Parent=b,PaddingLeft=UDim.new(0,12)})
+        b.Activated:Connect(cb)
+        return b
+    end
+
+    -- драг окна
+    local dragging, dragStart, startPos
+    Top.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+           or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; dragStart = i.Position; startPos = Popup.Position
+        end
+    end)
+    UIS.InputChanged:Connect(function(i)
+        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement
+           or i.UserInputType == Enum.UserInputType.Touch) then
+            local d = i.Position - dragStart
+            Popup.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
+                                        startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        end
+    end)
+    UIS.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+           or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
+    end)
+
+    OpenBtn.Activated:Connect(function()
+        Popup.Visible = not Popup.Visible
+        if Popup.Visible and not activeScreen then showScreen("halloween", ACCENT_HW) end
+    end)
+
+    -- ==================== HALLOWEEN SCREEN ====================
+    head(SHalloween, "🍬 CANDY FARM", ACCENT_HW)
+
+    local CANDY_NAMES = {"Candy", "CandyCorn", "Sweet", "Treat"}
+    local function isCandy(obj)
+        if not obj then return false end
+        for _, nm in ipairs(CANDY_NAMES) do
+            if obj.Name:lower():find(nm:lower()) then return true end
+        end
+        return false
+    end
+    local function collectCandy()
+        local found = {}
+        for _, d in pairs(WS:GetDescendants()) do
+            if isCandy(d) and (d:IsA("BasePart") or d:IsA("Tool")) then
+                found[#found+1] = d
+            end
+        end
+        return found
+    end
+    local function farmCandy()
+        local candies = collectCandy()
+        if #candies == 0 then return end
+        for _, candy in ipairs(candies) do
+            if candy:IsA("BasePart") then
+                safeTP(CFrame.new(candy.Position + Vector3.new(0,2,0)))
+            elseif candy:IsA("Tool") then
+                pcall(function()
+                    if candy.Parent ~= LP.Backpack and candy:IsDescendantOf(WS) then
+                        candy.Parent = LP.Backpack
+                    end
+                end)
+            end
+            task.wait(0.03)
+        end
+    end
+
+    toggleIn(SHalloween, "Auto Farm Candy", "popup_candy", false, function(v)
+        if v then
+            task.spawn(function()
+                while registry.popup_candy.get() do
+                    task.wait(0.4)
+                    pcall(farmCandy)
+                end
+            end)
+        end
+    end, ACCENT_HW)
+
+    toggleIn(SHalloween, "Aggressive (0.15s)", "popup_aggro", false, function(v)
+        if v then
+            task.spawn(function()
+                while registry.popup_aggro.get() do
+                    task.wait(0.15)
+                    pcall(farmCandy)
+                end
+            end)
+        end
+    end, ACCENT_HW)
+
+    toggleIn(SHalloween, "Auto-Pick to Backpack", "popup_pick", true, nil, ACCENT_HW)
+
+    head(SHalloween, "🎃 TP TO SKINS", ACCENT_HW)
+
+    local HW_KEYS = {"hallow", "candle", "ghost", "treat", "trick", "spider", "bat", "pumpkin", "skull"}
+    local function isHW(name)
+        if not name then return false end
+        local n2 = name:lower()
+        for _, k in ipairs(HW_KEYS) do if n2:find(k) then return true end end
+        return false
+    end
+
+    buttonIn(SHalloween, "TP to nearest Halloween Tool", function()
+        local root = safeRoot(); if not root then return end
+        local best, bd = nil, math.huge
+        for _, d in pairs(WS:GetDescendants()) do
+            if d:IsA("Tool") and isHW(d.Name) then
+                local p = d:GetPivot().Position
+                local dist = (root.Position - p).Magnitude
+                if dist < bd then bd = dist; best = d end
+            end
+        end
+        if best then safeTP(CFrame.new(best:GetPivot().Position + Vector3.new(0,3,0))) end
+    end, ACCENT_HW)
+
+    buttonIn(SHalloween, "TP to nearest Candy", function()
+        local root = safeRoot(); if not root then return end
+        local best, bd = nil, math.huge
+        for _, d in pairs(WS:GetDescendants()) do
+            if isCandy(d) and d:IsA("BasePart") then
+                local dist = (root.Position - d.Position).Magnitude
+                if dist < bd then bd = dist; best = d end
+            end
+        end
+        if best then safeTP(CFrame.new(best.Position + Vector3.new(0,3,0))) end
+    end, ACCENT_HW)
+
+    head(SHalloween, "💥 FLING", ACCENT_HW)
+
+    local flingTarget = nil
+    local flingList = n("ScrollingFrame",{
+        Parent = SHalloween,
+        BackgroundColor3 = Color3.fromRGB(30,30,40),
+        BorderSizePixel = 0,
+        Size = UDim2.new(1,-12,0,100),
+        ScrollBarThickness = 4,
+        CanvasSize = UDim2.new(0,0,0,0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        ZIndex = 606,
+    })
+    n("UICorner",{CornerRadius=UDim.new(0,6),Parent=flingList})
+    n("UIListLayout",{Parent=flingList,Padding=UDim.new(0,3),SortOrder=Enum.SortOrder.LayoutOrder})
+    n("UIPadding",{Parent=flingList,PaddingLeft=UDim.new(0,6),PaddingRight=UDim.new(0,6),
+        PaddingTop=UDim.new(0,4),PaddingBottom=UDim.new(0,4)})
+
+    local function refreshFlingList()
+        for _, c in pairs(flingList:GetChildren()) do
+            if c:IsA("TextButton") then c:Destroy() end
+        end
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LP then
+                local b = n("TextButton",{
+                    Parent = flingList,
+                    BackgroundColor3 = Color3.fromRGB(50,50,65),
+                    BorderSizePixel = 0,
+                    Size = UDim2.new(1,-12,0,26),
+                    Font = Enum.Font.Gotham,
+                    Text = p.Name,
+                    TextColor3 = Color3.fromRGB(220,220,240),
+                    TextSize = 12,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    AutoButtonColor = false,
+                    ZIndex = 607,
+                })
+                n("UIPadding",{Parent=b,PaddingLeft=UDim.new(0,8)})
+                b.Activated:Connect(function()
+                    flingTarget = p
+                    b.BackgroundColor3 = ACCENT_HW
+                end)
+            end
+        end
+    end
+    refreshFlingList()
+    Players.PlayerAdded:Connect(refreshFlingList)
+    Players.PlayerRemoving:Connect(function() task.wait(0.1); refreshFlingList() end)
+
+    buttonIn(SHalloween, "Fling Selected", function()
+        if not flingTarget or not flingTarget.Character then return end
+        local hrp = flingTarget.Character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        pcall(function()
+            local bv = Instance.new("BodyVelocity")
+            bv.Velocity = Vector3.new(1e5,1e5,1e5)
+            bv.MaxForce = Vector3.new(math.huge,math.huge,math.huge)
+            bv.Parent = hrp
+            game:GetService("Debris"):AddItem(bv, 1)
+        end)
+    end, ACCENT_HW)
+
+    buttonIn(SHalloween, "↻ Refresh List", refreshFlingList, ACCENT_HW)
+
+    -- ==================== COLOR SCREEN ====================
+    head(SColor, "🎨 MENU BACKGROUND", ACCENT)
+
+    local hue, sat, val = 0, 0.8, 0.15
+    local origBg, origTrans = nil, nil
+    if Main then
+        origBg = Main.BackgroundColor3
+        origTrans = Main.BackgroundTransparency
+    end
+
+    local function applyMenuBg()
+        if not Main then return end
+        local c = Color3.fromHSV(hue/360, sat, val)
+        Main.BackgroundColor3 = c
+        if Top then Top.BackgroundColor3 = c end
+        if SideScroll then SideScroll.BackgroundColor3 = c end
+        if Body then Body.BackgroundColor3 = c end
+    end
+
+    -- слайдеры внутри color screen (свои, не registry)
+    local function sliderIn(parent, txt, min, max, default, cb)
+        local b = n("Frame",{
+            Parent = parent,
+            BackgroundColor3 = Color3.fromRGB(40,40,50),
+            BorderSizePixel = 0,
+            Size = UDim2.new(1,-12,0,50),
+            ZIndex = 606,
+        })
+        n("UICorner",{CornerRadius=UDim.new(0,6),Parent=b})
+        n("TextLabel",{
+            Parent = b, BackgroundTransparency = 1,
+            Position = UDim2.new(0,12,0,4), Size = UDim2.new(1,-80,0,20),
+            Font = Enum.Font.GothamBold, Text = txt,
+            TextColor3 = Color3.fromRGB(220,220,240), TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 607,
+        })
+        local valLbl = n("TextLabel",{
+            Parent = b, BackgroundTransparency = 1,
+            Position = UDim2.new(1,-60,0,4), Size = UDim2.new(0,50,0,20),
+            Font = Enum.Font.GothamBold, Text = tostring(default),
+            TextColor3 = ACCENT, TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Right, ZIndex = 607,
+        })
+        local tr = n("Frame",{
+            Parent = b, BackgroundColor3 = Color3.fromRGB(80,80,100),
+            BorderSizePixel = 0, Position = UDim2.new(0,12,0,32),
+            Size = UDim2.new(1,-24,0,6), ZIndex = 607,
+        })
+        n("UICorner",{CornerRadius=UDim.new(1,0),Parent=tr})
+        local fl = n("Frame",{
+            Parent = tr, BackgroundColor3 = ACCENT,
+            BorderSizePixel = 0, Size = UDim2.new((default-min)/(max-min),0,1,0),
+            ZIndex = 608,
+        })
+        n("UICorner",{CornerRadius=UDim.new(1,0),Parent=fl})
+        local cur = default
+        local function apply(v)
+            cur = v
+            fl.Size = UDim2.new((v-min)/(max-min),0,1,0)
+            valLbl.Text = tostring(v)
+            if cb then cb(v) end
+        end
+        local drag = false
+        local function upd(i)
+            local r = math.clamp((i.Position.X - tr.AbsolutePosition.X)/tr.AbsoluteSize.X, 0, 1)
+            apply(math.floor(min + (max-min)*r + 0.5))
+        end
+        tr.InputBegan:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.MouseButton1
+               or i.UserInputType == Enum.UserInputType.Touch then drag = true; upd(i) end
+        end)
+        UIS.InputChanged:Connect(function(i)
+            if drag and (i.UserInputType == Enum.UserInputType.MouseMovement
+               or i.UserInputType == Enum.UserInputType.Touch) then upd(i) end
+        end)
+        UIS.InputEnded:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.MouseButton1
+               or i.UserInputType == Enum.UserInputType.Touch then drag = false end
+        end)
+        return b
+    end
+
+    sliderIn(SColor, "Hue (0-360)", 0, 360, 0, function(v) hue = v; applyMenuBg() end)
+    sliderIn(SColor, "Saturation (%)", 0, 100, 80, function(v) sat = v/100; applyMenuBg() end)
+    sliderIn(SColor, "Brightness (%)", 0, 100, 15, function(v) val = v/100; applyMenuBg() end)
+    sliderIn(SColor, "Transparency (%)", 0, 100, 15, function(v)
+        local t = v/100
+        if Main then Main.BackgroundTransparency = t end
+        if Top then Top.BackgroundTransparency = t end
+        if SideScroll then SideScroll.BackgroundTransparency = t end
+        if Body then Body.BackgroundTransparency = t end
+    end)
+
+    head(SColor, "─ ACCENTS ─", ACCENT)
+
+    buttonIn(SColor, "Apply Color to Accents", function()
+        local c = Color3.fromHSV(hue/360, math.max(sat, 0.6), 1)
+        for _, d in pairs(GUI:GetDescendants()) do
+            if d:IsA("TextLabel") or d:IsA("TextButton") then
+                if d.TextColor3 == COL.titleText or d.TextColor3 == COL.tabText then
+                    d.TextColor3 = c
+                end
+            elseif d:IsA("Frame") then
+                if d.BackgroundColor3 == COL.good or d.BackgroundColor3 == Color3.fromRGB(120,120,120) then
+                    d.BackgroundColor3 = c
+                end
+            elseif d:IsA("UIStroke") then
+                if d.Color == COL.titleText then d.Color = c end
+            end
+        end
+    end, ACCENT)
+
+    buttonIn(SColor, "Reset Theme", function()
+        if not Main then return end
+        Main.BackgroundColor3 = origBg
+        if Top then Top.BackgroundColor3 = origBg end
+        if SideScroll then SideScroll.BackgroundColor3 = origBg end
+        if Body then Body.BackgroundColor3 = origBg end
+        Main.BackgroundTransparency = origTrans
+    end, ACCENT)
+
+    -- ==================== CHANGELOG SCREEN ====================
+    head(SChangelog, "📜 VERSION HISTORY", ACCENT)
+
+    local CHANGELOG = {
+        {v="1.4.0", date="2025-10-19", lines={
+            "+ popup hub: halloween / color / changelog",
+            "+ candy farm (auto + aggressive)",
+            "+ menu background image + hue sliders",
+            "+ halloween tool teleport",
+            "+ resizer handle (bottom-right)",
+            "! fixed: tools (knife/gun/murderer)",
+            "! fixed: lobby roles until round start",
+            "! fixed: respawn (visuals + weapon)",
+        }},
+        {v="1.3.0", date="2025-10-15", lines={
+            "+ skinchanger (godly/chroma filter)",
+            "+ persist: autosave + autoload",
+            "+ player tab: kill selected, aimlock",
+            "+ wallbang",
+            "+ avatar Kiti",
+        }},
+        {v="1.2.0", date="2025-10-10", lines={
+            "+ settings+: change key, themes, reset",
+            "+ config tab: load by name",
+            "+ trade helper: prices on hands",
+        }},
+        {v="1.1.0", date="2025-10-05", lines={
+            "+ secret status: badge, hub tag, fps/ping/mem",
+            "+ visual+: sky presets, wings",
+            "+ menu+: shape, pen, lang",
+        }},
+        {v="1.0.0", date="2025-10-01", lines={
+            "+ first release: core GUI, tabs, makeToggle/makeSlider",
+            "+ main/visual/combat/pvp/farm features",
+            "+ cube minimize",
+        }},
+    }
+
+    for _, entry in ipairs(CHANGELOG) do
+        head(SChangelog, "v"..entry.v.."  ("..entry.date..")", Color3.fromRGB(255,200,120))
+        for _, line in ipairs(entry.lines) do
+            n("TextLabel",{
+                Parent = SChangelog,
+                BackgroundColor3 = Color3.fromRGB(30,30,40),
+                BackgroundTransparency = 0.5,
+                BorderSizePixel = 0,
+                Size = UDim2.new(1,-12,0,26),
+                Font = Enum.Font.Code,
+                Text = "  "..line,
+                TextColor3 = line:sub(1,1) == "+" and Color3.fromRGB(120,220,120) or
+                           line:sub(1,1) == "!" and Color3.fromRGB(255,180,60) or
+                           Color3.fromRGB(200,200,220),
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                ZIndex = 606,
+            })
+        end
+        -- отступ
+        n("Frame",{
+            Parent = SChangelog,
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1,0,0,6),
+            ZIndex = 606,
+        })
+    end
+
+    -- начальный экран
+    showScreen("halloween", ACCENT_HW)
+
+    print("[PopupHub] loaded — 3 screens (halloween, color, changelog)")
+end
+-- ==================== END POPUP HUB ====================
 print("creator limbo godlike loaded")
 
