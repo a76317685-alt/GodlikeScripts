@@ -1,0 +1,131 @@
+-- Delta / клиентский скрипт
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Debris = game:GetService("Debris")
+local LP = Players.LocalPlayer
+
+-- Модель дрона (собери сам или скопируй с сервера, если доступно)
+local drone = Instance.new("Model")
+drone.Name = "FPV_Drone"
+
+local body = Instance.new("Part")
+body.Size = Vector3.new(1, 1, 2)
+body.Shape = Enum.PartType.Block
+body.Anchored = false
+body.CanCollide = false
+body.Material = Enum.Material.Metal
+body.Color = Color3.fromRGB(60, 60, 60)
+body.Parent = drone
+
+local wing = Instance.new("Part")
+wing.Size = Vector3.new(4, 0.2, 0.6)
+wing.Anchored = false
+wing.CanCollide = false
+wing.Color = Color3.fromRGB(40, 40, 40)
+wing.Parent = drone
+
+drone.PrimaryPart = body
+drone.Parent = workspace
+
+-- Сварка крыла
+local weld = Instance.new("WeldConstraint")
+weld.Part0 = body
+weld.Part1 = wing
+weld.Parent = body
+
+-- Позиция спавна — перед игроком
+local hrp = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+if hrp then
+    body.CFrame = hrp.CFrame * CFrame.new(0, 5, -10)
+    wing.CFrame = body.CFrame
+end
+
+local SPEED = 150
+local BLAST_RADIUS = 25
+local FLING_POWER = 300
+local DAMAGE = 100
+
+local vel = Instance.new("LinearVelocity")
+local att = Instance.new("Attachment", body)
+vel.Attachment0 = att
+vel.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+vel.MaxForce = math.huge
+vel.VectorVelocity = Vector3.zero
+vel.Parent = body
+
+local function getTarget()
+    local closest, dist = nil, math.huge
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LP then
+            local char = plr.Character
+            if char then
+                local h = char:FindFirstChild("Humanoid")
+                local r = char:FindFirstChild("HumanoidRootPart")
+                if h and h.Health > 0 and r then
+                    local d = (r.Position - body.Position).Magnitude
+                    if d < dist then dist = d; closest = r end
+                end
+            end
+        end
+    end
+    return closest
+end
+
+local exploded = false
+
+local function explode()
+    if exploded then return end
+    exploded = true
+    vel:Destroy()
+    body.Anchored = true
+
+    -- Локальный визуальный взрыв
+    local ex = Instance.new("Explosion")
+    ex.Position = body.Position
+    ex.BlastRadius = BLAST_RADIUS
+    ex.BlastPressure = 0
+    ex.DestroyJointRadiusPercent = 0
+    ex.Parent = workspace
+
+    -- Локальный fling всех рядом (виден только тебе, если нет репликации)
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local char = plr.Character
+        if char then
+            local r = char:FindFirstChild("HumanoidRootPart")
+            local h = char:FindFirstChild("Humanoid")
+            if r and h and h.Health > 0 then
+                local d = (r.Position - body.Position).Magnitude
+                if d <= BLAST_RADIUS then
+                    local dir = (r.Position - body.Position).Unit
+                    local bv = Instance.new("BodyVelocity")
+                    bv.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+                    bv.Velocity = dir * FLING_POWER + Vector3.new(0, 100, 0)
+                    bv.Parent = r
+                    Debris:AddItem(bv, 0.15)
+                    h:TakeDamage(DAMAGE)
+                end
+            end
+        end
+    end
+
+    Debris:AddItem(drone, 1)
+end
+
+body.Touched:Connect(function(hit)
+    if exploded then return end
+    if hit:IsDescendantOf(drone) then return end
+    local char = hit:FindFirstAncestorOfClass("Model")
+    if char and char:FindFirstChild("Humanoid") then
+        explode()
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    if exploded then return end
+    local t = getTarget()
+    if t then
+        local dir = (t.Position - body.Position).Unit
+        vel.VectorVelocity = dir * SPEED
+        body.CFrame = CFrame.lookAt(body.Position, body.Position + dir)
+    end
+end)
