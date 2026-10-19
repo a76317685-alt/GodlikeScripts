@@ -78,3 +78,47 @@ task.spawn(function()
         task.wait(0.5)
     end
 end)
+-- Запусти это один раз, чтобы появилась кнопка
+
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local lp = Players.LocalPlayer
+
+-- Защита от дублей
+if CoreGui:FindFirstChild("FarmToggleGUI") then
+    CoreGui.FarmToggleGUI:Destroy()
+end
+
+-- Создаем интерфейс
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "FarmToggleGUI"
+ScreenGui.Parent = CoreGui
+ScreenGui.ResetOnSpawn = false
+
+local Button = Instance.new("TextButton")
+Button.Size = UDim2.new(0, 120, 0, 50)
+Button.Position = UDim2.new(0, 20, 0.5, 0)
+Button.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+Button.Font = Enum.Font.SourceSansBold
+Button.TextSize = 20
+Button.Text = "Фарм: ВКЛ"
+Button.Parent = ScreenGui
+Button.BorderSizePixel = 0
+
+-- Логика переключения
+local isRunning = true
+
+Button.MouseButton1Click:Connect(function()
+    isRunning = not isRunning
+    
+    if isRunning then
+        Button.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+        Button.Text = "Фарм: ВКЛ"
+        -- Тут можно прописать вызов функции запуска, если нужно
+    else
+        Button.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+        Button.Text = "Фарм: ВЫКЛ"
+        -- Тут можно прописать вызов функции остановки, если нужно
+    end
+end)
