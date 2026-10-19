@@ -4284,4 +4284,308 @@ do
     print("[AimV2] loaded — aimlock, auto shoot, pvp button")
 end
 -- ==================== END AIM V2 ====================
+-- language: Lua, file: godlike_candy_fx.lua, runtime: Roblox Executor, deps: none
+-- *watch for: candy в MM2 — это Tool/Part с именем "Candy", спавнится в Workspace периодически*
+-- *watch for: resizer должен двигать правый-нижний угол — меняем Size, Position оставляем*
+-- *watch for: drag handle не должен конфликтовать с Top drag — цепляем только за угол*
+
+-- ==================== CANDY FARM + MENU FX ====================
+do
+    if getgenv().GodlikeCandyFX_loaded then
+        print("[CandyFX] already loaded")
+        return
+    end
+    getgenv().GodlikeCandyFX_loaded = true
+
+    local UIS = game:GetService("UserInputService")
+    local WS  = game:GetService("Workspace")
+
+    local function safeChar() local c = LP.Character; return c and c.Parent and c or nil end
+    local function safeRoot() local c = safeChar(); return c and c:FindFirstChild("HumanoidRootPart") end
+    local function safeHum()  local c = safeChar(); return c and c:FindFirstChildOfClass("Humanoid") end
+    local function safeTP(cf)  local r = safeRoot(); if r then r.CFrame = cf end end
+
+    -- ==================== AUTO FARM CANDY ====================
+    -- ищем candy по имени / Tool / Part / в Inventory
+    local CANDY_NAMES = {"Candy", "CandyCorn", "Sweet", "Treat"}
+    local function isCandy(obj)
+        if not obj then return false end
+        for _, nm in ipairs(CANDY_NAMES) do
+            if obj.Name:lower():find(nm:lower()) then return true end
+        end
+        return false
+    end
+
+    local function collectCandy()
+        local found = {}
+        -- 1) Part в Workspace
+        for _, d in pairs(WS:GetDescendants()) do
+            if isCandy(d) and (d:IsA("BasePart") or d:IsA("Tool")) then
+                found[#found+1] = d
+            end
+        end
+        return found
+    end
+
+    local function farmCandy()
+        local candies = collectCandy()
+        if #candies == 0 then return end
+        local root = safeRoot()
+        if not root then return end
+        for _, candy in ipairs(candies) do
+            if candy:IsA("BasePart") then
+                safeTP(CFrame.new(candy.Position + Vector3.new(0, 2, 0)))
+            elseif candy:IsA("Tool") then
+                pcall(function()
+                    if candy.Parent ~= LP.Backpack and candy:IsDescendantOf(WS) then
+                        candy.Parent = LP.Backpack
+                    end
+                end)
+            end
+            task.wait(0.03)
+        end
+    end
+
+    -- UI
+    local TFarm = nil
+    for _, t in pairs(tabs) do
+        if t.name == "farm" then TFarm = t; break end
+    end
+    if not TFarm then TFarm = makeTab("farm") end
+
+    local function head(parent, txt)
+        return n("TextLabel",{
+            Parent=parent, BackgroundTransparency=1,
+            Size=UDim2.new(1,-12,0,22), Font=Enum.Font.GothamBold,
+            Text=txt, TextColor3=COL.titleText, TextSize=13,
+            TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7,
+        })
+    end
+
+    head(TFarm.page, "─ CANDY FARM ─")
+
+    -- основной тоггл
+    makeToggle(TFarm.page, "Auto Farm Candy (Halloween)", "candy_farm", false, function(v)
+        if v then
+            task.spawn(function()
+                while registry.candy_farm.get() do
+                    task.wait(0.4)
+                    pcall(farmCandy)
+                end
+            end)
+        end
+    end)
+
+    -- радиус сбора
+    makeSlider(TFarm.page, "Candy Radius", "candy_rad", 20, 500, 100)
+
+    -- авто-подбор в Backpack
+    makeToggle(TFarm.page, "Auto-Pick Candy to Backpack", "candy_pick", true)
+
+    -- агрессивный режим (каждые 0.15с)
+    makeToggle(TFarm.page, "Aggressive (0.15s)", "candy_aggro", false, function(v)
+        if v then
+            task.spawn(function()
+                while registry.candy_aggro and registry.candy_aggro.get() do
+                    task.wait(0.15)
+                    pcall(farmCandy)
+                end
+            end)
+        end
+    end)
+
+    -- ==================== MENU FX: THEME + TRANSPARENCY ====================
+    local TMenu = nil
+    for _, t in pairs(tabs) do
+        if t.name == "menu" then TMenu = t; break end
+    end
+    if not TMenu then TMenu = makeTab("menu") end
+
+    head(TMenu.page, "─ CUSTOM THEME ─")
+
+    -- Сохраняем оригинальные цвета
+    local origMainBg = Main.BackgroundColor3
+    local origMainTrans = Main.BackgroundTransparency
+
+    -- выбор цвета фона (по HSV слайдерам)
+    local hue = 0
+    local sat = 0.8
+    local val = 0.15
+
+    makeSlider(TMenu.page, "Menu Hue (0-360)", "menu_hue", 0, 360, 0, function(v)
+        hue = v
+        local c = Color3.fromHSV(hue/360, sat, val)
+        Main.BackgroundColor3 = c
+        Top.BackgroundColor3 = c
+        SideScroll.BackgroundColor3 = c
+        Body.BackgroundColor3 = c
+    end)
+
+    makeSlider(TMenu.page, "Menu Saturation (%)", "menu_sat", 0, 100, 80, function(v)
+        sat = v / 100
+        Main.BackgroundColor3 = Color3.fromHSV(hue/360, sat, val)
+    end)
+
+    makeSlider(TMenu.page, "Menu Brightness (%)", "menu_val", 0, 100, 15, function(v)
+        val = v / 100
+        Main.BackgroundColor3 = Color3.fromHSV(hue/360, sat, val)
+    end)
+
+    -- прозрачность
+    makeSlider(TMenu.page, "Menu Transparency (%)", "menu_trans", 0, 100, 15, function(v)
+        local t = v / 100
+        Main.BackgroundTransparency = t
+        Top.BackgroundTransparency = t
+        SideScroll.BackgroundTransparency = t
+        Body.BackgroundTransparency = t
+    end)
+
+    -- применение цвета к акцентам (title, buttons, accents)
+    makeRealBtn(TMenu.page, "Apply Color to Accents", function()
+        local c = Color3.fromHSV(hue/360, math.max(sat, 0.6), 1)
+        for _, d in pairs(GUI:GetDescendants()) do
+            if d:IsA("TextLabel") or d:IsA("TextButton") then
+                if d.TextColor3 == COL.titleText or d.TextColor3 == COL.tabText then
+                    d.TextColor3 = c
+                end
+            elseif d:IsA("Frame") then
+                if d.BackgroundColor3 == COL.good or d.BackgroundColor3 == Color3.fromRGB(120,120,120) then
+                    d.BackgroundColor3 = c
+                end
+            elseif d:IsA("UIStroke") then
+                if d.Color == COL.titleText then d.Color = c end
+            end
+        end
+        print("[CandyFX] accents recolored")
+    end)
+
+    -- сброс к дефолту
+    makeRealBtn(TMenu.page, "Reset Theme", function()
+        Main.BackgroundColor3 = origMainBg
+        Top.BackgroundColor3 = origMainBg
+        SideScroll.BackgroundColor3 = origMainBg
+        Body.BackgroundColor3 = origMainBg
+        Main.BackgroundTransparency = origMainTrans
+        print("[CandyFX] theme reset")
+    end)
+
+    -- ==================== RESIZE HANDLE (правый-нижний угол) ====================
+    local RESIZE_SIZE = 20  -- размер ручки в px
+
+    local resizer = n("TextButton",{
+        Parent=Main,
+        BackgroundColor3=Color3.fromRGB(60,110,220),
+        BackgroundTransparency=0.4,
+        BorderSizePixel=0,
+        Position=UDim2.new(1,-RESIZE_SIZE-4, 1,-RESIZE_SIZE-4),
+        Size=UDim2.new(0,RESIZE_SIZE,0,RESIZE_SIZE),
+        Text="", AutoButtonColor=false, ZIndex=100,
+    })
+    n("UICorner",{CornerRadius=UDim.new(0,4),Parent=resizer})
+    -- стрелки внутри (диагональ)
+    n("TextLabel",{
+        Parent=resizer, BackgroundTransparency=1, Size=UDim2.fromScale(1,1),
+        Font=Enum.Font.GothamBold, Text="◢",
+        TextColor3=Color3.fromRGB(255,255,255), TextSize=14, ZIndex=101,
+    })
+
+    local resizing = false
+    local resizeStart = nil
+    local startSize = nil
+
+    resizer.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+           or input.UserInputType == Enum.UserInputType.Touch then
+            resizing = true
+            resizeStart = input.Position
+            startSize = Main.Size
+        end
+    end)
+
+    UIS.InputChanged:Connect(function(input)
+        if not resizing then return end
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+           or input.UserInputType == Enum.UserInputType.Touch then
+            local delta = input.Position - resizeStart
+            local newW = math.max(400, startSize.X.Offset + delta.X)
+            local newH = math.max(240, startSize.Y.Offset + delta.Y)
+            Main.Size = UDim2.new(startSize.X.Scale, newW, startSize.Y.Scale, newH)
+            -- resizer остаётся в правом-нижнем
+            resizer.Position = UDim2.new(1, -RESIZE_SIZE - 4, 1, -RESIZE_SIZE - 4)
+        end
+    end)
+
+    UIS.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+           or input.UserInputType == Enum.UserInputType.Touch then
+            resizing = false
+        end
+    end)
+
+    -- ==================== FLING PLAYERS UI ====================
+    local TPvP = nil
+    for _, t in pairs(tabs) do
+        if t.name == "pvp" then TPvP = t; break end
+    end
+    if TPvP then
+        head(TPvP.page, "─ FLING SELECTED ─")
+
+        local flingTarget = nil
+
+        local list = n("ScrollingFrame",{
+            Parent=TPvP.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+            Size=UDim2.new(1,-12,0,120), ScrollBarThickness=4,
+            CanvasSize=UDim2.new(0,0,0,0), AutomaticCanvasSize=Enum.AutomaticSize.Y,
+            ZIndex=6,
+        })
+        n("UIListLayout",{Parent=list,Padding=UDim.new(0,3),SortOrder=Enum.SortOrder.LayoutOrder})
+        n("UIPadding",{Parent=list,PaddingLeft=UDim.new(0,6),PaddingRight=UDim.new(0,6),PaddingTop=UDim.new(0,4),PaddingBottom=UDim.new(0,4)})
+
+        local function refreshFlingList()
+            for _, c in pairs(list:GetChildren()) do
+                if c:IsA("TextButton") then c:Destroy() end
+            end
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LP then
+                    local b = n("TextButton",{
+                        Parent=list, BackgroundColor3=Color3.fromRGB(245,245,245),
+                        BorderSizePixel=0, Size=UDim2.new(1,-12,0,26),
+                        Font=Enum.Font.Gotham, Text=p.Name,
+                        TextColor3=COL.tabText, TextSize=12,
+                        TextXAlignment=Enum.TextXAlignment.Left,
+                        AutoButtonColor=false, ZIndex=7,
+                    })
+                    n("UIPadding",{Parent=b,PaddingLeft=UDim.new(0,8)})
+                    b.Activated:Connect(function()
+                        flingTarget = p
+                        b.BackgroundColor3 = Color3.fromRGB(200,220,255)
+                    end)
+                end
+            end
+        end
+        refreshFlingList()
+        Players.PlayerAdded:Connect(refreshFlingList)
+        Players.PlayerRemoving:Connect(function() task.wait(0.1); refreshFlingList() end)
+
+        makeRealBtn(TPvP.page, "Fling Selected Player", function()
+            if not flingTarget or not flingTarget.Character then return end
+            local hrp = flingTarget.Character:FindFirstChild("HumanoidRootPart")
+            if not hrp then return end
+            pcall(function()
+                local bv = Instance.new("BodyVelocity")
+                bv.Velocity = Vector3.new(1e5, 1e5, 1e5)
+                bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+                bv.Parent = hrp
+                game:GetService("Debris"):AddItem(bv, 1)
+            end)
+            print("[CandyFX] flung "..flingTarget.Name)
+        end)
+
+        makeRealBtn(TPvP.page, "Refresh Player List", refreshFlingList)
+    end
+
+    print("[CandyFX] loaded — candy farm, theme, transparency, resizer, fling")
+end
+-- ==================== END CANDY FX ====================
+print("creator limbo godlike loaded")
 
