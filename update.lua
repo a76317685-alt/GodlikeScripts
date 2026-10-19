@@ -6567,5 +6567,338 @@ do
     print("[PopupHub] loaded — 3 screens (halloween, color, changelog)")
 end
 -- ==================== END POPUP HUB ====================
+-- language: Lua, file: godlike_murd_shahid.lua, runtime: Roblox Executor, deps: none
+-- *watch for: работает только если ты MURDERER и у тебя Knife в руках/backpack*
+-- *watch for: "нет сигнала" — фейковый killfeed, чисто визуал, никого не убивает кроме Activate*
+-- *watch for: рывок через CFrame — если anti-cheat режет, оставляем только Activate*
+
+-- ==================== MURDERER SHAHID ====================
+do
+    if getgenv().GodlikeShahid_loaded then
+        print("[Shahid] already loaded")
+        return
+    end
+    getgenv().GodlikeShahid_loaded = true
+
+    local UIS = game:GetService("UserInputService")
+    local WS  = game:GetService("Workspace")
+
+    local function safeChar() local c = LP.Character; return c and c.Parent and c or nil end
+    local function safeRoot() local c = safeChar(); return c and c:FindFirstChild("HumanoidRootPart") end
+    local function safeHum()  local c = safeChar(); return c and c:FindFirstChildOfClass("Humanoid") end
+
+    local function head(parent, txt, color)
+        return n("TextLabel",{
+            Parent=parent, BackgroundTransparency=1,
+            Size=UDim2.new(1,-12,0,22), Font=Enum.Font.GothamBold,
+            Text=txt, TextColor3=color or COL.titleText, TextSize=13,
+            TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7,
+        })
+    end
+
+    -- UI: вкладка shahid
+    local TShahid = makeTab("shahid")
+
+    head(TShahid.page, "─ MURDERER SHAHID (knife kamikaze) ─")
+
+    -- фейковый killfeed
+    local fakeFeedGui = n("ScreenGui",{
+        Name = "G_FakeFeed", ResetOnSpawn=false, Parent=CoreGui,
+    })
+    local feedHolder = n("Frame",{
+        Parent=fakeFeedGui, BackgroundTransparency=1,
+        Position=UDim2.new(1,-320,0,60), Size=UDim2.new(0,300,0,200),
+        ZIndex=200,
+    })
+    n("UIListLayout",{Parent=feedHolder,Padding=UDim.new(0,4),SortOrder=Enum.SortOrder.LayoutOrder})
+
+    local function pushFeed(text, color)
+        local lbl = n("TextLabel",{
+            Parent=feedHolder, BackgroundColor3=Color3.fromRGB(0,0,0),
+            BackgroundTransparency=0.4, BorderSizePixel=0,
+            Size=UDim2.new(1,0,0,28), Font=Enum.Font.GothamBold,
+            Text=text, TextColor3=color or Color3.fromRGB(255,120,120),
+            TextSize=12, TextXAlignment=Enum.TextXAlignment.Right, ZIndex=201,
+        })
+        n("UICorner",{CornerRadius=UDim.new(0,4),Parent=lbl})
+        task.delay(4, function() if lbl.Parent then lbl:Destroy() end end)
+    end
+
+    -- «НЕТ СИГНАЛА» скрин
+    local function showNoSignal(duration)
+        local g = n("ScreenGui",{Name="G_NoSignal",ResetOnSpawn=false,Parent=CoreGui})
+        local bg = n("Frame",{
+            Parent=g, BackgroundColor3=Color3.fromRGB(0,0,0),
+            BackgroundTransparency=0, Size=UDim2.fromScale(1,1), ZIndex=999,
+        })
+        -- шумовая полоса
+        local noise = n("Frame",{
+            Parent=bg, BackgroundColor3=Color3.fromRGB(40,40,40),
+            BackgroundTransparency=0.4, BorderSizePixel=0,
+            Position=UDim2.new(0,0,0.5,-2), Size=UDim2.new(1,0,0,4),
+            ZIndex=1000,
+        })
+        n("TextLabel",{
+            Parent=bg, BackgroundTransparency=1,
+            Size=UDim2.fromScale(1,0.4), Position=UDim2.new(0,0,0.3,0),
+            Font=Enum.Font.GothamBold, Text="НЕТ СИГНАЛА",
+            TextColor3=Color3.fromRGB(255,50,50), TextSize=48, ZIndex=1001,
+        })
+        n("TextLabel",{
+            Parent=bg, BackgroundTransparency=1,
+            Size=UDim2.fromScale(1,0.1), Position=UDim2.new(0,0,0.6,0),
+            Font=Enum.Font.Gotham, Text="NO SIGNAL",
+            TextColor3=Color3.fromRGB(200,200,200), TextSize=18, ZIndex=1001,
+        })
+        task.delay(duration or 2.5, function() g:Destroy() end)
+    end
+
+    -- spawn визуального дрона и рывок к цели
+    local function spawnDrone(target)
+        if not target or not target.Character then return end
+        local c = safeChar()
+        if not c then return end
+        local myRoot = safeRoot()
+        local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+        if not myRoot or not targetRoot then return end
+
+        -- визуальный дрон: маленький красный Part, летит по дуге
+        local drone = n("Part",{
+            Name="G_Shahid",
+            Size=Vector3.new(1.2, 1.2, 1.2),
+            Color=Color3.fromRGB(200,30,30),
+            Material=Enum.Material.Neon,
+            Anchored=true, CanCollide=false,
+            CFrame=CFrame.new(myRoot.Position + Vector3.new(0,3,0)),
+            Parent=WS,
+        })
+        n("PointLight",{Color=Color3.fromRGB(255,60,60), Range=8, Brightness=2, Parent=drone})
+
+        -- летим к цели через TweenService
+        local TS = game:GetService("TweenService")
+        local dist = (targetRoot.Position - drone.Position).Magnitude
+        local duration = math.clamp(dist / 100, 0.3, 1.5)
+        local tw = TS:Create(drone, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+            CFrame = CFrame.new(targetRoot.Position)
+        })
+        tw:Play()
+
+        tw.Completed:Connect(function()
+            -- визуальный взрыв
+            local expl = n("Explosion",{
+                Position = drone.Position,
+                BlastRadius = 6,
+                DestroyJointRadiusPercent = 0,
+                Visible = true,
+                Parent = WS,
+            })
+            task.delay(0.5, function() drone:Destroy() end)
+
+            -- фейковый killfeed + "нет сигнала" (только тебе)
+            pushFeed("💀 "..target.Name.." eliminated", Color3.fromRGB(255,80,80))
+            showNoSignal(2.5)
+        end)
+    end
+
+    -- ОСНОВНОЙ рывок к цели (реально наносит урон через Knife)
+    local function shahidRush(target)
+        if not target or not target.Character then return false end
+        local myChar = safeChar()
+        if not myChar then return false end
+        local myRoot = safeRoot()
+        local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+        if not myRoot or not targetRoot then return false end
+
+        -- ищем Knife
+        local knife = nil
+        for _, t in pairs(myChar:GetChildren()) do
+            if t:IsA("Tool") and (t.Name:lower():find("knife") or t.Name:lower():find("dagger")) then
+                knife = t; break
+            end
+        end
+        if not knife then
+            local bp = LP:FindFirstChild("Backpack")
+            if bp then
+                for _, t in pairs(bp:GetChildren()) do
+                    if t:IsA("Tool") and (t.Name:lower():find("knife") or t.Name:lower():find("dagger")) then
+                        knife = t; break
+                    end
+                end
+            end
+        end
+        if not knife then
+            pushFeed("⚠ no knife!", Color3.fromRGB(255,180,60))
+            return false
+        end
+
+        -- экипируем
+        local h = safeHum()
+        if h and knife.Parent ~= myChar then
+            pcall(function() h:EquipTool(knife) end)
+            task.wait(0.05)
+        end
+
+        -- рывок: телепорт рядом с целью + разворот + Activate
+        pcall(function()
+            local dir = (myRoot.Position - targetRoot.Position).Unit
+            local behind = targetRoot.Position + dir * 2 + Vector3.new(0, 0, 0)
+            myRoot.CFrame = CFrame.new(behind, targetRoot.Position)
+            task.wait(0.03)
+            knife:Activate()
+            task.wait(0.05)
+            knife:Activate()
+        end)
+
+        -- визуальный дрон
+        spawnDrone(target)
+
+        print("[Shahid] rushed "..target.Name)
+        return true
+    end
+
+    -- выбор цели
+    local function pickMurdTarget()
+        return getNearest(function(p)
+            if p == LP or isWL(p) then return false end
+            if not p.Character then return false end
+            return getRole(p) ~= "MURDERER"
+        end)
+    end
+
+    -- === КНОПКИ ===
+
+    local drones = {}
+
+    local function spawnVisualDroneTo(target)
+        if not target or not target.Character then return end
+        local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+        if not targetRoot then return end
+        local myRoot = safeRoot()
+        if not myRoot then return end
+
+        local drone = n("Part",{
+            Name="G_Drone",
+            Size=Vector3.new(1.5, 0.6, 2.0),
+            Color=Color3.fromRGB(180,180,200),
+            Material=Enum.Material.Metal,
+            Anchored=false, CanCollide=false,
+            CFrame=CFrame.new(myRoot.Position + Vector3.new(0,5,0)),
+            Parent=WS,
+        })
+        n("PointLight",{Color=Color3.fromRGB(255,60,60), Range=6, Brightness=1, Parent=drone})
+        local bodyV = n("BodyVelocity",{
+            Velocity=Vector3.new(0,0,0),
+            MaxForce=Vector3.new(math.huge,math.huge,math.huge),
+            P=1000,
+            Parent=drone,
+        })
+        -- направление к цели
+        local dir = (targetRoot.Position + Vector3.new(0,2,0) - drone.Position).Unit
+        bodyV.Velocity = dir * 80
+        table.insert(drones, {part=drone, bv=bodyV, target=target})
+    end
+
+    -- цикл: дроны летят, при касании — взрыв
+    task.spawn(function()
+        while task.wait(0.1) do
+            for i = #drones, 1, -1 do
+                local d = drones[i]
+                if not d.part or not d.part.Parent then
+                    table.remove(drones, i)
+                    continue
+                end
+                if d.target and d.target.Character then
+                    local tr = d.target.Character:FindFirstChild("HumanoidRootPart")
+                    if tr and (d.part.Position - tr.Position).Magnitude < 4 then
+                        -- касание — взрыв + fakefeed
+                        n("Explosion",{
+                            Position = d.part.Position,
+                            BlastRadius = 5,
+                            DestroyJointRadiusPercent = 0,
+                            Parent = WS,
+                        })
+                        pushFeed("💥 drone hit "..d.target.Name, Color3.fromRGB(255,140,40))
+                        d.part:Destroy()
+                        table.remove(drones, i)
+                    end
+                else
+                    d.part:Destroy()
+                    table.remove(drones, i)
+                end
+            end
+        end
+    end)
+
+    -- 1) Шахед — рывок с ножом
+    makeRealBtn(TShahid.page, "🚀 SHAHID → nearest (real kill)", function()
+        local t = pickMurdTarget()
+        if not t then print("[Shahid] no target"); return end
+        shahidRush(t)
+    end)
+
+    -- 2) Спавн визуального дрона (летит к цели, взрывается)
+    makeRealBtn(TShahid.page, "✈ Spawn drone to nearest", function()
+        local t = pickMurdTarget()
+        if not t then print("[Shahid] no target"); return end
+        spawnVisualDroneTo(t)
+        pushFeed("✈ drone launched → "..t.Name, Color3.fromRGB(120,180,255))
+    end)
+
+    -- 3) Фейковый «нет сигнала»
+    makeRealBtn(TShahid.page, "📺 Fake NO SIGNAL (2.5s)", function()
+        showNoSignal(2.5)
+    end)
+
+    -- 4) Kill feed test
+    makeRealBtn(TShahid.page, "💀 Fake killfeed test", function()
+        pushFeed("💀 test_kill eliminated", Color3.fromRGB(255,80,80))
+    end)
+
+    head(TShahid.page, "─ FLING NEAR ─")
+
+    makeToggle(TShahid.page, "Auto-Fling (rush + fling)", "shahid_fling", false, function(v)
+        if v then
+            task.spawn(function()
+                while registry.shahid_fling.get() do
+                    task.wait(0.5)
+                    local t = pickMurdTarget()
+                    if t and t.Character then
+                        local tr = t.Character:FindFirstChild("HumanoidRootPart")
+                        local mr = safeRoot()
+                        if tr and mr and (mr.Position - tr.Position).Magnitude < 15 then
+                            pcall(function()
+                                local bv = Instance.new("BodyVelocity")
+                                bv.Velocity = Vector3.new(1e5,1e5,1e5)
+                                bv.MaxForce = Vector3.new(math.huge,math.huge,math.huge)
+                                bv.Parent = tr
+                                game:GetService("Debris"):AddItem(bv, 1)
+                            end)
+                            pushFeed("💨 flung "..t.Name, Color3.fromRGB(120,220,120))
+                        end
+                    end
+                end
+            end)
+        end
+    end)
+
+    -- 5) Прямой fling
+    makeRealBtn(TShahid.page, "💨 Fling nearest player", function()
+        local t = pickMurdTarget()
+        if not t or not t.Character then return end
+        local tr = t.Character:FindFirstChild("HumanoidRootPart")
+        if not tr then return end
+        pcall(function()
+            local bv = Instance.new("BodyVelocity")
+            bv.Velocity = Vector3.new(1e5,1e5,1e5)
+            bv.MaxForce = Vector3.new(math.huge,math.huge,math.huge)
+            bv.Parent = tr
+            game:GetService("Debris"):AddItem(bv, 1)
+        end)
+        pushFeed("💨 flung "..t.Name, Color3.fromRGB(120,220,120))
+    end)
+
+    print("[Shahid] loaded — murderer shahid + drones + fake feed")
+end
+-- ==================== END MURDERER SHAHID ====================
 print("creator limbo godlike loaded")
 
