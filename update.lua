@@ -5195,5 +5195,663 @@ do
     print("[ColorHW] loaded — color tab, halloween tab, resizer")
 end
 -- ==================== END COLOR + HALLOWEEN ====================
+-- language: Lua, file: godlike_update_info.lua, runtime: Roblox Executor, deps: none
+-- *watch for: version check через version.txt на GitHub — если пусто, fallback на локальную*
+-- *watch for: info tab показывает статы хаба и счётчик юзеров через Player:GetAttribute*
+-- *watch for: ставится после color_halloween, до persist*
+
+-- ==================== UPDATE + INFO TABS ====================
+do
+    if getgenv().GodlikeUpdInfo_loaded then
+        print("[UpdInfo] already loaded")
+        return
+    end
+    getgenv().GodlikeUpdInfo_loaded = true
+
+    local HS = game:GetService("HttpService")
+    local UIS = game:GetService("UserInputService")
+    local BASE = "https://raw.githubusercontent.com/a76317685-alt/GodlikeScripts/refs/heads/main/"
+
+    local VERSION = getgenv().Godlike_version or "1.4.0"
+
+    local function head(parent, txt)
+        return n("TextLabel",{
+            Parent=parent, BackgroundTransparency=1,
+            Size=UDim2.new(1,-12,0,22), Font=Enum.Font.GothamBold,
+            Text=txt, TextColor3=COL.titleText, TextSize=13,
+            TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7,
+        })
+    end
+
+    local function body(parent, h)
+        return n("TextLabel",{
+            Parent=parent, BackgroundTransparency=1,
+            Size=UDim2.new(1,-12,0,h or 100), Font=Enum.Font.Code,
+            Text="", TextColor3=COL.tabText, TextSize=11,
+            TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Top,
+            TextWrapped=true, ZIndex=6,
+        })
+    end
+
+    -- ==================== ВКЛАДКА UPDATE ====================
+    local TUpd = makeTab("update")
+
+    head(TUpd.page, "─ CURRENT VERSION ─")
+
+    local verBox = n("Frame",{
+        Parent=TUpd.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+        Size=UDim2.new(1,-12,0,50), ZIndex=6,
+    })
+    n("UICorner",{CornerRadius=UDim.new(0,6),Parent=verBox})
+    local verLbl = n("TextLabel",{
+        Parent=verBox, BackgroundTransparency=1, Size=UDim2.fromScale(1,1),
+        Font=Enum.Font.GothamBold, Text="Godlike v"..VERSION,
+        TextColor3=COL.titleText, TextSize=18, ZIndex=7,
+    })
+
+    local statusLbl = n("TextLabel",{
+        Parent=TUpd.page, BackgroundTransparency=1,
+        Size=UDim2.new(1,-12,0,22), Font=Enum.Font.Gotham,
+        Text="", TextColor3=COL.tabText, TextSize=12,
+        TextXAlignment=Enum.TextXAlignment.Left, ZIndex=6,
+    })
+
+    head(TUpd.page, "─ CHECK FOR UPDATES ─")
+
+    local function fetchRemoteVersion()
+        local ok, res = pcall(function()
+            return game:HttpGet(BASE.."version.txt?t="..tick())
+        end)
+        if not ok or not res then return nil end
+        return res:match("^%s*([%d%.]+)")
+    end
+
+    local function cmpVer(a, b)
+        local function split(s) local t={} for x in s:gmatch("%d+") do t[#t+1]=tonumber(x) end return t end
+        local A, B = split(a), split(b)
+        for i=1, math.max(#A,#B) do
+            local x, y = A[i] or 0, B[i] or 0
+            if x ~= y then return x < y and -1 or 1 end
+        end
+        return 0
+    end
+
+    makeRealBtn(TUpd.page, "↻ Check Version", function()
+        statusLbl.Text = "checking..."
+        statusLbl.TextColor3 = Color3.fromRGB(180,180,180)
+        task.spawn(function()
+            local remote = fetchRemoteVersion()
+            if not remote then
+                statusLbl.Text = "cannot reach GitHub (offline?)"
+                statusLbl.TextColor3 = Color3.fromRGB(220,80,80)
+                return
+            end
+            local cmp = cmpVer(VERSION, remote)
+            if cmp < 0 then
+                statusLbl.Text = "update available: v"..remote
+                statusLbl.TextColor3 = Color3.fromRGB(255,180,60)
+            elseif cmp > 0 then
+                statusLbl.Text = "you are ahead: v"..remote.." (dev build?)"
+                statusLbl.TextColor3 = Color3.fromRGB(120,200,255)
+            else
+                statusLbl.Text = "up to date: v"..remote
+                statusLbl.TextColor3 = Color3.fromRGB(80,220,120)
+            end
+        end)
+    end)
+
+    makeRealBtn(TUpd.page, "⚡ Reload Script (latest)", function()
+        if getgenv().Godlike_unload then
+            pcall(function() getgenv().Godlike_unload() end)
+        end
+        task.wait(0.5)
+        local ok, err = pcall(function()
+            loadstring(game:HttpGet(BASE.."update.lua?t="..tick()))()
+        end)
+        if not ok then
+            print("[UpdInfo] reload failed: "..tostring(err))
+        end
+    end)
+
+    head(TUpd.page, "─ CHANGELOG ─")
+
+    local changelog = n("ScrollingFrame",{
+        Parent=TUpd.page, BackgroundColor3=Color3.fromRGB(20,20,20),
+        BorderSizePixel=0, Size=UDim2.new(1,-12,0,200),
+        ScrollBarThickness=4, CanvasSize=UDim2.new(0,0,0,0),
+        AutomaticCanvasSize=Enum.AutomaticSize.Y, ZIndex=6,
+    })
+    n("UIPadding",{Parent=changelog,PaddingTop=UDim.new(0,8),PaddingBottom=UDim.new(0,8),
+        PaddingLeft=UDim.new(0,10),PaddingRight=UDim.new(0,10)})
+
+    local CHANGELOG = {
+        {v="1.4.0", date="2025-10-19", lines={
+            "+ halloween tab: candy farm, TP to Halloween tools",
+            "+ color tab: hue/sat/val/transparency for menu",
+            "+ aimlock v2: 100% headshot + auto-shoot",
+            "+ trade helper v2: auto price sync",
+            "+ anti invalid position guard",
+            "+ fix: tools (knife/gun/murderer mode)",
+            "+ fix: lobby role (unknown until round start)",
+            "+ fix: respawn (visuals + weapon re-equip)",
+            "! resizer handle (bottom-right corner)",
+        }},
+        {v="1.3.0", date="2025-10-15", lines={
+            "+ skinchanger (godly/chroma filter)",
+            "+ persist: autosave + autoload",
+            "+ player tab: list, kill selected, aimlock",
+            "+ wallbang",
+            "+ avatar Kiti",
+        }},
+        {v="1.2.0", date="2025-10-10", lines={
+            "+ settings+: change key, themes, reset",
+            "+ config tab: load by name",
+            "+ trade helper: prices on hands",
+        }},
+        {v="1.1.0", date="2025-10-05", lines={
+            "+ secret status: badge, hub tag, fps/ping/mem",
+            "+ visual+: sky presets, wings",
+            "+ menu+: shape, pen, lang",
+        }},
+        {v="1.0.0", date="2025-10-01", lines={
+            "+ first release: core GUI, tabs, makeToggle/makeSlider",
+            "+ main/visual/combat/pvp/farm features",
+            "+ cube minimize",
+        }},
+    }
+
+    local changelogText = {}
+    for _, entry in ipairs(CHANGELOG) do
+        changelogText[#changelogText+1] = "── v"..entry.v.." ("..entry.date..") ──"
+        for _, line in ipairs(entry.lines) do
+            changelogText[#changelogText+1] = "  "..line
+        end
+        changelogText[#changelogText+1] = ""
+    end
+
+    local logLbl = n("TextLabel",{
+        Parent=changelog, BackgroundTransparency=1,
+        Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y,
+        Font=Enum.Font.Code, Text=table.concat(changelogText, "\n"),
+        TextColor3=Color3.fromRGB(200,220,255), TextSize=11,
+        TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Top,
+        TextWrapped=true, ZIndex=7,
+    })
+
+    -- ==================== ВКЛАДКА INFO ====================
+    local TInfo = makeTab("info")
+
+    head(TInfo.page, "─ GODLIKE INFO ─")
+
+    local infoBox = n("Frame",{
+        Parent=TInfo.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+        Size=UDim2.new(1,-12,0,120), ZIndex=6,
+    })
+    n("UICorner",{CornerRadius=UDim.new(0,6),Parent=infoBox})
+    n("UIPadding",{Parent=infoBox,PaddingLeft=UDim.new(0,12),PaddingTop=UDim.new(0,8)})
+
+    local infoLbl = n("TextLabel",{
+        Parent=infoBox, BackgroundTransparency=1,
+        Size=UDim2.new(1,-24,1,-16), Font=Enum.Font.Code,
+        Text="", TextColor3=COL.tabText, TextSize=12,
+        TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Top,
+        TextWrapped=true, ZIndex=7,
+    })
+
+    local function updateInfo()
+        local executor = "?"
+        pcall(function() executor = identifyexecutor and identifyexecutor() or "?" end)
+        local modCount = 0
+        if getgenv().G and type(getgenv().G) == "table" then
+            for _ in pairs(getgenv().G) do modCount = modCount + 1 end
+        end
+        infoLbl.Text = string.format(
+            "version:   v%s\n"..
+            "executor:  %s\n"..
+            "user:      %s\n"..
+            "loaded:    %d modules\n"..
+            "uptime:    %s",
+            VERSION,
+            executor,
+            LP.Name,
+            modCount,
+            os.date and os.date("%H:%M:%S") or "?"
+        )
+    end
+    updateInfo()
+    task.spawn(function()
+        while task.wait(5) do updateInfo() end
+    end)
+
+    head(TInfo.page, "─ HUB USERS (this server) ─")
+
+    local usersBox = n("Frame",{
+        Parent=TInfo.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+        Size=UDim2.new(1,-12,0,100), ZIndex=6,
+    })
+    n("UICorner",{CornerRadius=UDim.new(0,6),Parent=usersBox})
+    n("UIPadding",{Parent=usersBox,PaddingLeft=UDim.new(0,12),PaddingTop=UDim.new(0,8)})
+
+    local usersLbl = n("TextLabel",{
+        Parent=usersBox, BackgroundTransparency=1,
+        Size=UDim2.new(1,-24,1,-16), Font=Enum.Font.Code,
+        Text="", TextColor3=COL.tabText, TextSize=12,
+        TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Top,
+        TextWrapped=true, ZIndex=7,
+    })
+
+    local function updateUsers()
+        local total = 0
+        local lines = {}
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p:GetAttribute("Godlike") then
+                total = total + 1
+                lines[#lines+1] = "  • "..p.Name
+            end
+        end
+        if total == 0 then
+            usersLbl.Text = "no other Godlike users detected"
+        else
+            usersLbl.Text = string.format("%d user(s):\n%s", total, table.concat(lines, "\n"))
+        end
+    end
+    updateUsers()
+    task.spawn(function()
+        while task.wait(2) do updateUsers() end
+    end)
+
+    head(TInfo.page, "─ LINKS ─")
+
+    local LINKS = {
+        {name="Telegram", url="t.me/godlike_rb"},
+        {name="GitHub",   url="github.com/a76317685-alt/GodlikeScripts"},
+    }
+
+    for _, lk in ipairs(LINKS) do
+        local b = n("TextButton",{
+            Parent=TInfo.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+            Size=UDim2.new(1,-12,0,32), Font=Enum.Font.GothamBold,
+            Text=lk.name.." → "..lk.url, TextColor3=COL.tabText, TextSize=12,
+            TextXAlignment=Enum.TextXAlignment.Left, AutoButtonColor=false, ZIndex=6,
+        })
+        n("UICorner",{CornerRadius=UDim.new(0,6),Parent=b})
+        n("UIPadding",{Parent=b,PaddingLeft=UDim.new(0,12)})
+        b.Activated:Connect(function()
+            if setclipboard then
+                setclipboard(lk.url)
+                print("[UpdInfo] copied: "..lk.url)
+            end
+        end)
+    end
+
+    head(TInfo.page, "─ CREDITS ─")
+
+    local creditsBox = n("Frame",{
+        Parent=TInfo.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+        Size=UDim2.new(1,-12,0,80), ZIndex=6,
+    })
+    n("UICorner",{CornerRadius=UDim.new(0,6),Parent=creditsBox})
+    n("UIPadding",{Parent=creditsBox,PaddingLeft=UDim.new(0,12),PaddingTop=UDim.new(0,8)})
+
+    n("TextLabel",{
+        Parent=creditsBox, BackgroundTransparency=1,
+        Size=UDim2.new(1,-24,1,-16), Font=Enum.Font.Code,
+        Text="Developer:  limboi\nScripter:   lokeii\nIdea:       Limbo",
+        TextColor3=COL.tabText, TextSize=12,
+        TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Top,
+        TextWrapped=true, ZIndex=7,
+    })
+
+    print("[UpdInfo] loaded — update tab, info tab")
+end
+-- ==================== END UPDATE + INFO ====================
+-- language: Lua, file: godlike_color_halloween_fixed.lua, runtime: Roblox Executor, deps: none
+-- *watch for: должен грузиться ПОСЛЕ godlike_mm2.lua (core: GUI, Main, tabs, makeTab)*
+-- *watch for: guard'ы проверяют makeTab/tabs/GUI/Main — если nil, блок отказывается грузиться*
+-- *watch for: если makeTab уже создал color/halloween — не дублируем*
+
+-- ==================== COLOR + HALLOWEEN (fixed) ====================
+do
+    if getgenv().GodlikeColorHW_loaded then
+        print("[ColorHW] already loaded — skip")
+        return
+    end
+
+    -- === GUARDS ===
+    if type(makeTab) ~= "function" then
+        warn("[ColorHW] makeTab is not defined — block must be placed AFTER godlike_mm2.lua")
+        return
+    end
+    if type(tabs) ~= "table" then
+        warn("[ColorHW] tabs table is missing — check core block order")
+        return
+    end
+    if not GUI or not Main then
+        warn("[ColorHW] GUI/Main missing — block must be placed AFTER core GUI creation")
+        return
+    end
+
+    local function hasTab(name)
+        for _, t in pairs(tabs) do
+            if t.name == name then return t end
+        end
+        return nil
+    end
+
+    local UIS = game:GetService("UserInputService")
+    local WS  = game:GetService("Workspace")
+
+    local function safeChar() local c = LP.Character; return c and c.Parent and c or nil end
+    local function safeRoot() local c = safeChar(); return c and c:FindFirstChild("HumanoidRootPart") end
+    local function safeTP(cf)  local r = safeRoot(); if r then r.CFrame = cf end end
+
+    local function head(parent, txt)
+        return n("TextLabel",{
+            Parent=parent, BackgroundTransparency=1,
+            Size=UDim2.new(1,-12,0,22), Font=Enum.Font.GothamBold,
+            Text=txt, TextColor3=COL.titleText, TextSize=13,
+            TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7,
+        })
+    end
+
+    -- ==================== ВКЛАДКА COLOR ====================
+    local TColor = hasTab("color") or makeTab("color")
+
+    -- чистим страницу от старых элементов (если блок перезапустили)
+    for _, c in pairs(TColor.page:GetChildren()) do
+        if c:IsA("TextButton") or c:IsA("TextLabel") or c:IsA("Frame") then
+            -- не трогаем UIListLayout / UIPadding
+            c:Destroy()
+        end
+    end
+
+    head(TColor.page, "─ MENU BACKGROUND ─")
+
+    local hue, sat, val = 0, 0.8, 0.15
+    local origBg = Main.BackgroundColor3
+    local origTrans = Main.BackgroundTransparency
+
+    local function applyMenuBg()
+        local c = Color3.fromHSV(hue/360, sat, val)
+        Main.BackgroundColor3 = c
+        Top.BackgroundColor3 = c
+        SideScroll.BackgroundColor3 = c
+        Body.BackgroundColor3 = c
+    end
+
+    makeSlider(TColor.page, "Hue (0-360)", "menu_hue", 0, 360, 0, function(v)
+        hue = v; applyMenuBg()
+    end)
+    makeSlider(TColor.page, "Saturation (%)", "menu_sat", 0, 100, 80, function(v)
+        sat = v/100; applyMenuBg()
+    end)
+    makeSlider(TColor.page, "Brightness (%)", "menu_val", 0, 100, 15, function(v)
+        val = v/100; applyMenuBg()
+    end)
+    makeSlider(TColor.page, "Transparency (%)", "menu_trans", 0, 100, 15, function(v)
+        local t = v/100
+        Main.BackgroundTransparency = t
+        Top.BackgroundTransparency = t
+        SideScroll.BackgroundTransparency = t
+        Body.BackgroundTransparency = t
+    end)
+
+    head(TColor.page, "─ ACCENTS ─")
+
+    makeRealBtn(TColor.page, "Apply Color to Accents", function()
+        local c = Color3.fromHSV(hue/360, math.max(sat, 0.6), 1)
+        for _, d in pairs(GUI:GetDescendants()) do
+            if d:IsA("TextLabel") or d:IsA("TextButton") then
+                if d.TextColor3 == COL.titleText or d.TextColor3 == COL.tabText then
+                    d.TextColor3 = c
+                end
+            elseif d:IsA("Frame") then
+                if d.BackgroundColor3 == COL.good or d.BackgroundColor3 == Color3.fromRGB(120,120,120) then
+                    d.BackgroundColor3 = c
+                end
+            elseif d:IsA("UIStroke") then
+                if d.Color == COL.titleText then d.Color = c end
+            end
+        end
+        print("[Color] accents recolored")
+    end)
+
+    makeRealBtn(TColor.page, "Reset Theme", function()
+        Main.BackgroundColor3 = origBg
+        Top.BackgroundColor3 = origBg
+        SideScroll.BackgroundColor3 = origBg
+        Body.BackgroundColor3 = origBg
+        Main.BackgroundTransparency = origTrans
+        print("[Color] theme reset")
+    end)
+
+    -- ==================== ВКЛАДКА HALLOWEEN ====================
+    local THW = hasTab("halloween") or makeTab("halloween")
+
+    for _, c in pairs(THW.page:GetChildren()) do
+        if c:IsA("TextButton") or c:IsA("TextLabel") or c:IsA("Frame") then
+            c:Destroy()
+        end
+    end
+
+    head(THW.page, "─ CANDY FARM ─")
+
+    local CANDY_NAMES = {"Candy", "CandyCorn", "Sweet", "Treat"}
+    local function isCandy(obj)
+        if not obj then return false end
+        for _, nm in ipairs(CANDY_NAMES) do
+            if obj.Name:lower():find(nm:lower()) then return true end
+        end
+        return false
+    end
+
+    local function collectCandy()
+        local found = {}
+        for _, d in pairs(WS:GetDescendants()) do
+            if isCandy(d) and (d:IsA("BasePart") or d:IsA("Tool")) then
+                found[#found+1] = d
+            end
+        end
+        return found
+    end
+
+    local function farmCandy()
+        local candies = collectCandy()
+        if #candies == 0 then return end
+        for _, candy in ipairs(candies) do
+            if candy:IsA("BasePart") then
+                safeTP(CFrame.new(candy.Position + Vector3.new(0,2,0)))
+            elseif candy:IsA("Tool") then
+                pcall(function()
+                    if candy.Parent ~= LP.Backpack and candy:IsDescendantOf(WS) then
+                        candy.Parent = LP.Backpack
+                    end
+                end)
+            end
+            task.wait(0.03)
+        end
+    end
+
+    makeToggle(THW.page, "Auto Farm Candy", "candy_farm", false, function(v)
+        if v then
+            task.spawn(function()
+                while registry.candy_farm and registry.candy_farm.get() do
+                    task.wait(0.4)
+                    pcall(farmCandy)
+                end
+            end)
+        end
+    end)
+
+    makeToggle(THW.page, "Aggressive (0.15s)", "candy_aggro", false, function(v)
+        if v then
+            task.spawn(function()
+                while registry.candy_aggro and registry.candy_aggro.get() do
+                    task.wait(0.15)
+                    pcall(farmCandy)
+                end
+            end)
+        end
+    end)
+
+    makeToggle(THW.page, "Auto-Pick to Backpack", "candy_pick", true)
+    makeSlider(THW.page, "Candy Radius", "candy_rad", 20, 500, 100)
+
+    head(THW.page, "─ HALLOWEEN SKINS ─")
+
+    local HW_KEYS = {"hallow", "candle", "ghost", "treat", "trick", "spider", "bat", "pumpkin", "skull"}
+    local function isHalloweenSkin(name)
+        if not name then return false end
+        local n = name:lower()
+        for _, k in ipairs(HW_KEYS) do
+            if n:find(k) then return true end
+        end
+        return false
+    end
+
+    makeRealBtn(THW.page, "TP to nearest Halloween Tool", function()
+        local root = safeRoot()
+        if not root then return end
+        local best, bd = nil, math.huge
+        for _, d in pairs(WS:GetDescendants()) do
+            if d:IsA("Tool") and isHalloweenSkin(d.Name) then
+                local pivot = d:GetPivot().Position
+                local dist = (root.Position - pivot).Magnitude
+                if dist < bd then bd = dist; best = d end
+            end
+        end
+        if best then
+            safeTP(CFrame.new(best:GetPivot().Position + Vector3.new(0,3,0)))
+            print("[HW] TP → "..best.Name)
+        else
+            print("[HW] no halloween tool found")
+        end
+    end)
+
+    makeRealBtn(THW.page, "TP to nearest Candy", function()
+        local root = safeRoot()
+        if not root then return end
+        local best, bd = nil, math.huge
+        for _, d in pairs(WS:GetDescendants()) do
+            if isCandy(d) and d:IsA("BasePart") then
+                local dist = (root.Position - d.Position).Magnitude
+                if dist < bd then bd = dist; best = d end
+            end
+        end
+        if best then
+            safeTP(CFrame.new(best.Position + Vector3.new(0,3,0)))
+            print("[HW] TP → candy")
+        end
+    end)
+
+    head(THW.page, "─ FLING SELECTED ─")
+
+    local flingTarget = nil
+    local list = n("ScrollingFrame",{
+        Parent=THW.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+        Size=UDim2.new(1,-12,0,120), ScrollBarThickness=4,
+        CanvasSize=UDim2.new(0,0,0,0), AutomaticCanvasSize=Enum.AutomaticSize.Y,
+        ZIndex=6,
+    })
+    n("UIListLayout",{Parent=list,Padding=UDim.new(0,3),SortOrder=Enum.SortOrder.LayoutOrder})
+    n("UIPadding",{Parent=list,PaddingLeft=UDim.new(0,6),PaddingRight=UDim.new(0,6),PaddingTop=UDim.new(0,4),PaddingBottom=UDim.new(0,4)})
+
+    local function refreshFlingList()
+        for _, c in pairs(list:GetChildren()) do
+            if c:IsA("TextButton") then c:Destroy() end
+        end
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LP then
+                local b = n("TextButton",{
+                    Parent=list, BackgroundColor3=Color3.fromRGB(245,245,245),
+                    BorderSizePixel=0, Size=UDim2.new(1,-12,0,26),
+                    Font=Enum.Font.Gotham, Text=p.Name,
+                    TextColor3=COL.tabText, TextSize=12,
+                    TextXAlignment=Enum.TextXAlignment.Left,
+                    AutoButtonColor=false, ZIndex=7,
+                })
+                n("UIPadding",{Parent=b,PaddingLeft=UDim.new(0,8)})
+                b.Activated:Connect(function()
+                    flingTarget = p
+                    b.BackgroundColor3 = Color3.fromRGB(200,220,255)
+                end)
+            end
+        end
+    end
+    refreshFlingList()
+    Players.PlayerAdded:Connect(refreshFlingList)
+    Players.PlayerRemoving:Connect(function() task.wait(0.1); refreshFlingList() end)
+
+    makeRealBtn(THW.page, "Fling Selected Player", function()
+        if not flingTarget or not flingTarget.Character then return end
+        local hrp = flingTarget.Character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        pcall(function()
+            local bv = Instance.new("BodyVelocity")
+            bv.Velocity = Vector3.new(1e5,1e5,1e5)
+            bv.MaxForce = Vector3.new(math.huge,math.huge,math.huge)
+            bv.Parent = hrp
+            game:GetService("Debris"):AddItem(bv, 1)
+        end)
+        print("[HW] flung "..flingTarget.Name)
+    end)
+
+    makeRealBtn(THW.page, "↻ Refresh Player List", refreshFlingList)
+
+    -- ==================== RESIZE HANDLE ====================
+    if not getgenv().GodlikeResizer_added then
+        getgenv().GodlikeResizer_added = true
+        local R = 20
+        local resizer = n("TextButton",{
+            Parent=Main, BackgroundColor3=Color3.fromRGB(60,110,220),
+            BackgroundTransparency=0.4, BorderSizePixel=0,
+            Position=UDim2.new(1,-R-4,1,-R-4), Size=UDim2.new(0,R,0,R),
+            Text="", AutoButtonColor=false, ZIndex=100,
+        })
+        n("UICorner",{CornerRadius=UDim.new(0,4),Parent=resizer})
+        n("TextLabel",{
+            Parent=resizer, BackgroundTransparency=1, Size=UDim2.fromScale(1,1),
+            Font=Enum.Font.GothamBold, Text="◢",
+            TextColor3=Color3.fromRGB(255,255,255), TextSize=14, ZIndex=101,
+        })
+
+        local resizing, rs, ss = false, nil, nil
+        resizer.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+               or input.UserInputType == Enum.UserInputType.Touch then
+                resizing = true; rs = input.Position; ss = Main.Size
+            end
+        end)
+        UIS.InputChanged:Connect(function(input)
+            if not resizing then return end
+            if input.UserInputType == Enum.UserInputType.MouseMovement
+               or input.UserInputType == Enum.UserInputType.Touch then
+                local d = input.Position - rs
+                Main.Size = UDim2.new(ss.X.Scale, math.max(400, ss.X.Offset + d.X),
+                                      ss.Y.Scale, math.max(240, ss.Y.Offset + d.Y))
+                resizer.Position = UDim2.new(1,-R-4,1,-R-4)
+            end
+        end)
+        UIS.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+               or input.UserInputType == Enum.UserInputType.Touch then
+                resizing = false
+            end
+        end)
+    end
+
+    getgenv().GodlikeColorHW_loaded = true
+    print("[ColorHW] loaded — color tab, halloween tab, resizer")
+
+    -- === ДИАГНОСТИКА ===
+    task.delay(1, function()
+        print("[ColorHW] current tabs:")
+        for i, t in ipairs(tabs) do
+            print(string.format("  %d. %-10s | btn=%s | page=%s",
+                i, t.name, tostring(t.btn ~= nil), tostring(t.page ~= nil)))
+        end
+    end)
+end
+-- ==================== END COLOR + HALLOWEEN ====================
 print("creator limbo godlike loaded")
 
