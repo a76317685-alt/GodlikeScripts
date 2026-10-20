@@ -7675,5 +7675,244 @@ do
     print("[Ban] encrypted ban system loaded — UserId " .. myId .. " OK")
 end
 -- ==================== END ENCRYPTED BAN ====================
+-- language: Lua, file: godlike_session_memory.lua, runtime: Roblox Executor, deps: none
+-- *watch for: сохранение в godlike/session.json — нужен writefile*
+-- *watch for: ставится ПОСЛЕ persist, чтобы не конфликтовать с autosave*
+-- *watch for: при первом запуске — пустая память, ничего не включает*
+
+-- ==================== SESSION MEMORY + DEVICE CHECK ====================
+do
+    if getgenv().GodlikeSession_loaded then
+        print("[Session] already loaded")
+        return
+    end
+    getgenv().GodlikeSession_loaded = true
+
+    local HS = game:GetService("HttpService")
+    local UIS = game:GetService("UserInputService")
+    local SESSION_FILE = "godlike/session.json"
+    local SESSION_KEYS = {
+        -- список тогглов/слайдеров которые запоминаем
+        -- если хочешь запоминать ВСЁ — раскомментируй `-- all` ниже
+    }
+
+    -- ==================== DEVICE CHECK ====================
+    local function detectDevice()
+        local isMobile = UIS.TouchEnabled and not UIS.KeyboardEnabled
+        local isPC = UIS.KeyboardEnabled and not UIS.TouchEnabled
+        local isHybrid = UIS.TouchEnabled and UIS.KeyboardEnabled
+
+        -- RAM (приблизительно)
+        local ramMb = 0
+        pcall(function()
+            ramMb = game:GetService("Stats"):GetTotalMemoryUsageMb()
+        end)
+
+        -- рендер
+        local gpu = "unknown"
+        pcall(function()
+            local renderStats = game:GetService("Stats").RenderStats
+            gpu = renderStats:FindFirstChild("GPU") and "ok" or "weak"
+        end)
+
+        -- рекомендация
+        local recommendation, color
+        if isMobile then
+            if ramMb > 1200 then
+                recommendation = "⚠ Телефон: норм (RAM > 1.2GB)\n✅ Скрипт загрузится, но следи за крашами"
+                color = Color3.fromRGB(255, 180, 60)
+            else
+                recommendation = "⚠ Телефон: слабый (RAM < 1.2GB)\n⚠️ Возможны краши. Рекомендую ПК или лайт-режим"
+                color = Color3.fromRGB(220, 80, 80)
+            end
+        elseif isPC then
+            recommendation = "✅ ПК: всё ок\n✅ Полный функционал доступен"
+            color = Color3.fromRGB(80, 220, 120)
+        elseif isHybrid then
+            recommendation = "✅ ПК/планшет: гибрид\n✅ Полный функционал"
+            color = Color3.fromRGB(80, 220, 120)
+        end
+
+        return {
+            isMobile = isMobile,
+            isPC = isPC,
+            isHybrid = isHybrid,
+            ramMb = ramMb,
+            gpu = gpu,
+            recommendation = recommendation,
+            color = color,
+        }
+    end
+
+    local device = detectDevice()
+
+    -- ==================== SESSION MEMORY ====================
+    local function loadSession()
+        if not (readfile and isfile and HS) then return {} end
+        if not isfile(SESSION_FILE) then return {} end
+        local ok, data = pcall(function()
+            return HS:JSONDecode(readfile(SESSION_FILE))
+        end)
+        if ok and type(data) == "table" then return data end
+        return {}
+    end
+
+    local function saveSession()
+        if not writefile then return end
+        local dump = {}
+        -- сохраняем ВСЕ ключи из registry (тогглы + слайдеры)
+        for k, v in pairs(registry) do
+            if v and v.get then
+                pcall(function() dump[k] = v.get() end)
+            end
+        end
+        pcall(function()
+            if not isfolder("godlike") then makefolder("godlike") end
+            writefile(SESSION_FILE, HS:JSONEncode(dump))
+        end)
+    end
+
+    -- ==================== АВТО-ВОССТАНОВЛЕНИЕ ====================
+    local function restoreSession()
+        local data = loadSession()
+        local restored = 0
+        for k, v in pairs(data) do
+            if registry[k] and registry[k].set then
+                local ok = pcall(function() registry[k].set(v) end)
+                if ok then restored = restored + 1 end
+            end
+        end
+        print("[Session] restored " .. restored .. " functions")
+        return restored
+    end
+
+    -- ==================== АВТО-СОХРАНЕНИЕ ====================
+    -- патчим registry.set, чтобы каждое изменение записывалось
+    task.delay(1, function()
+        for key, entry in pairs(registry) do
+            if entry.set and type(entry.set) == "function" then
+                local orig = entry.set
+                entry.set = function(v)
+                    local ok, err = pcall(orig, v)
+                    -- сохраняем с задержкой 1с (не каждый клик)
+                    task.delay(1, saveSession)
+                    return ok, err
+                end
+            end
+        end
+    end)
+
+    -- ==================== DEVICE WELCOME SCREEN ====================
+    local CoreGui = (pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui")) or game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+
+    local function showWelcome()
+        local gui = Instance.new("ScreenGui")
+        gui.Name = "GodlikeWelcome"
+        gui.ResetOnSpawn = false
+        gui.Parent = CoreGui
+
+        local bg = Instance.new("Frame")
+        bg.Size = UDim2.fromScale(1, 1)
+        bg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        bg.BackgroundTransparency = 0.3
+        bg.BorderSizePixel = 0
+        bg.Parent = gui
+
+        local card = Instance.new("Frame")
+        card.Size = UDim2.new(0, 400, 0, 240)
+        card.Position = UDim2.fromScale(0.5, 0.5)
+        card.AnchorPoint = Vector2.new(0.5, 0.5)
+        card.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+        card.BorderSizePixel = 0
+        card.Parent = bg
+
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 12)
+        corner.Parent = card
+
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = device.color
+        stroke.Thickness = 2
+        stroke.Parent = card
+
+        local title = Instance.new("TextLabel")
+        title.Size = UDim2.new(1, 0, 0, 40)
+        title.Position = UDim2.new(0, 0, 0, 10)
+        title.BackgroundTransparency = 1
+        title.Text = "🎃 Godlike Hub"
+        title.TextColor3 = Color3.fromRGB(255, 180, 60)
+        title.Font = Enum.Font.GothamBold
+        title.TextSize = 20
+        title.Parent = card
+
+        local deviceLbl = Instance.new("TextLabel")
+        deviceLbl.Size = UDim2.new(1, -20, 0, 30)
+        deviceLbl.Position = UDim2.new(0, 10, 0, 55)
+        deviceLbl.BackgroundTransparency = 1
+        deviceLbl.Text = string.format("Устройство: %s | RAM: %d MB",
+            device.isMobile and "Телефон" or (device.isPC and "ПК" or "Гибрид"),
+            math.floor(device.ramMb))
+        deviceLbl.TextColor3 = Color3.fromRGB(180, 180, 200)
+        deviceLbl.Font = Enum.Font.Gotham
+        deviceLbl.TextSize = 12
+        deviceLbl.Parent = card
+
+        local recLbl = Instance.new("TextLabel")
+        recLbl.Size = UDim2.new(1, -20, 0, 80)
+        recLbl.Position = UDim2.new(0, 10, 0, 90)
+        recLbl.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+        recLbl.BorderSizePixel = 0
+        recLbl.Text = device.recommendation
+        recLbl.TextColor3 = device.color
+        recLbl.Font = Enum.Font.GothamBold
+        recLbl.TextSize = 13
+        recLbl.TextWrapped = true
+        recLbl.Parent = card
+
+        local recCorner = Instance.new("UICorner")
+        recCorner.CornerRadius = UDim.new(0, 6)
+        recCorner.Parent = recLbl
+
+        local restoreLbl = Instance.new("TextLabel")
+        restoreLbl.Size = UDim2.new(1, -20, 0, 30)
+        restoreLbl.Position = UDim2.new(0, 10, 0, 180)
+        restoreLbl.BackgroundTransparency = 1
+        restoreLbl.Text = "Восстанавливаю прошлую сессию..."
+        restoreLbl.TextColor3 = Color3.fromRGB(120, 180, 255)
+        restoreLbl.Font = Enum.Font.Gotham
+        restoreLbl.TextSize = 12
+        restoreLbl.Parent = card
+
+        task.delay(2.5, function()
+            gui:Destroy()
+        end)
+    end
+
+    -- ==================== ЗАПУСК ====================
+    showWelcome()
+
+    task.delay(1.5, function()
+        local n = restoreSession()
+        if n > 0 then
+            print("[Session] restored " .. n .. " functions from last run")
+        else
+            print("[Session] no previous session — starting fresh")
+        end
+    end)
+
+    -- ==================== ЭКСПОРТ ====================
+    getgenv().GodlikeSession = {
+        save = saveSession,
+        load = loadSession,
+        restore = restoreSession,
+        device = device,
+    }
+
+    print(string.format("[Session] loaded | device: %s | RAM: %d MB",
+        device.isMobile and "mobile" or (device.isPC and "pc" or "hybrid"),
+        math.floor(device.ramMb)))
+end
+-- ==================== END SESSION MEMORY ====================
 print("creator limbo godlike loaded")
+
 
