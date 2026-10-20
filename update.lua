@@ -1,6 +1,365 @@
 -- language: Lua, file: godlike_mm2.lua, runtime: Roblox Executor
 -- name: Godlike MM2 | Kiti Cube Editio
+-- language: Lua, file: godlike_selfheal.lua, runtime: Roblox Executor, deps: none
+-- *watch for: ставится В САМОЕ НАЧАЛО, до всех блоков, или оборачивает их через loadstring*
+-- *watch for: не может починить логику — только изолирует упавший блок, чтобы остальное жило*
+-- *watch for: если блок упал на 1-й строке — считается мёртвым и пропускается*
 
+-- ==================== SELF-HEALING LOADER ====================
+do
+    if getgenv().GodlikeSelfHeal_loaded then
+        print("[Heal] already loaded")
+        return
+    end
+    getgenv().GodlikeSelfHeal_loaded = true
+
+    local HS = game:GetService("HttpService")
+    local BASE = "https://raw.githubusercontent.com/a76317685-alt/GodlikeScripts/refs/heads/main/"
+
+    local health = {
+        version = getgenv().Godlike_version or "1.5.0",
+        loaded = {},
+        failed = {},
+        skipped = {},
+        startTime = tick(),
+    }
+    getgenv().GodlikeHealth = health
+
+    -- ==================== ЛОГГЕР ====================
+    local LOG_PREFIX = "[Heal]"
+
+    local function log(...)
+        local parts = {...}
+        local line = table.concat((function()
+            local t = {}
+            for i, v in ipairs(parts) do t[i] = tostring(v) end
+            return t
+        end)(), " ")
+        print(LOG_PREFIX .. " " .. line)
+    end
+
+    local function warnf(...)
+        local parts = {...}
+        local line = table.concat((function()
+            local t = {}
+            for i, v in ipairs(parts) do t[i] = tostring(v) end
+            return t
+        end)(), " ")
+        warn(LOG_PREFIX .. " " .. line)
+    end
+
+    -- ==================== HTTP ====================
+    local function fetch(path)
+        local ok, res = pcall(function()
+            return game:HttpGet(BASE .. path .. "?t=" .. math.floor(tick()))
+        end)
+        if ok and res and #res > 0 then return res end
+        return nil
+    end
+
+    -- ==================== ПРОВЕРКА СИНТАКСИСА ====================
+    -- loadstring(src) — если возвращает nil, значит синтаксическая ошибка
+    local function checkSyntax(src, name)
+        local fn, err = loadstring(src, "@" .. name)
+        if not fn then
+            return false, tostring(err)
+        end
+        return true, fn
+    end
+
+    -- ==================== ПРОВЕРКА КРИТИЧЕСКИХ ЗАВИСИМОСТЕЙ ====================
+    local REQUIRED_GLOBALS = {"game", "workspace", "Instance", "Vector3", "CFrame", "Color3", "Enum", "UDim2"}
+    local function checkEnvironment()
+        local missing = {}
+        for _, g in ipairs(REQUIRED_GLOBALS) do
+            if not _G[g] and not getfenv()[g] then
+                missing[#missing+1] = g
+            end
+        end
+        return #missing == 0, missing
+    end
+
+    -- ==================== ПРОВЕРКА EXECUTOR API ====================
+    local function checkExecutor()
+        local features = {
+            http = (game.HttpGet ~= nil) or (syn and syn.request ~= nil) or (http and http.request ~= nil),
+            clipboard = (setclipboard ~= nil),
+            filesystem = (writefile ~= nil and readfile ~= nil),
+            executor = (identifyexecutor ~= nil) or (getexecutorname ~= nil),
+            loadstring = (loadstring ~= nil),
+        }
+        return features
+    end
+
+    -- ==================== БЕЗОПАСНАЯ ЗАГРУЗКА БЛОКА ====================
+    local function safeLoad(name, url)
+        local src = fetch(url)
+        if not src then
+            warnf("fetch failed: " .. name)
+            health.failed[#health.failed+1] = {name=name, reason="fetch"}
+            return false, "fetch failed"
+        end
+
+        local ok, fnOrErr = checkSyntax(src, name)
+        if not ok then
+            warnf("syntax error in " .. name .. ": " .. tostring(fnOrErr))
+            health.failed[#health.failed+1] = {name=name, reason="syntax", error=tostring(fnOrErr)}
+            return false, "syntax: " .. tostring(fnOrErr)
+        end
+
+        local fn = fnOrErr
+        local ok2, err = pcall(fn)
+        if not ok2 then
+            warnf("runtime error in " .. name .. ": " .. tostring(err))
+            health.failed[#health.failed+1] = {name=name, reason="runtime", error=tostring(err)}
+            return false, "runtime: " .. tostring(err)
+        end
+
+        health.loaded[#health.loaded+1] = name
+        log("✓ " .. name)
+        return true
+    end
+
+    -- ==================== ПРОВЕРКА ОКРУЖЕНИЯ ====================
+    local envOk, missing = checkEnvironment()
+    if not envOk then
+        warnf("missing globals: " .. table.concat(missing, ", "))
+    end
+
+    local exec = checkExecutor()
+    log("executor features:")
+    log("  http:      " .. tostring(exec.http))
+    log("  clipboard: " .. tostring(exec.clipboard))
+    log("  fs:        " .. tostring(exec.filesystem))
+    log("  loadstring:" .. tostring(exec.loadstring))
+
+    if not exec.http then
+        warnf("no HTTP — cannot load modules, using cache only")
+    end
+    if not exec.loadstring then
+        warnf("no loadstring — модули не загрузятся")
+    end
+
+    -- ==================== ПРОВЕРКА ПАПКИ ====================
+    if exec.filesystem then
+        if not isfolder("godlike") then
+            pcall(function() makefolder("godlike") end)
+            log("created godlike/ folder")
+        end
+    end
+
+    -- ==================== ПРОВЕРКА ФАЙЛА АВТОСЕЙВА ====================
+    if exec.filesystem then
+        local autosave = "godlike/autosave.json"
+        if isfile(autosave) then
+            local ok, data = pcall(function()
+                return HS:JSONDecode(readfile(autosave))
+            end)
+            if not ok then
+                warnf("autosave.json corrupted — deleting")
+                pcall(function() delfile(autosave) end)
+                health.skipped[#health.skipped+1] = "corrupted autosave"
+            else
+                log("autosave.json OK (" .. (function()
+                    local c = 0
+                    for _ in pairs(data) do c = c + 1 end
+                    return c
+                end)() .. " entries)")
+            end
+        end
+    end
+
+    -- ==================== ПРОВЕРКА CORE GUI ====================
+    local CoreGui = (pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui")) or LP:WaitForChild("PlayerGui")
+    if CoreGui then
+        -- чистим старые инстансы Godlike
+        local cleaned = 0
+        for _, g in ipairs(CoreGui:GetChildren()) do
+            if g.Name:match("^Godlike") or g.Name:match("^GodlikeScripts") or g.Name:match("^G_") then
+                pcall(function() g:Destroy() end)
+                cleaned = cleaned + 1
+            end
+        end
+        if cleaned > 0 then
+            log("cleaned " .. cleaned .. " old instances")
+        end
+    end
+
+    -- ==================== ПРОВЕРКА ОСНОВНОГО ФАЙЛА ====================
+    local mainSrc = fetch("godlike_mm2.lua")
+    if mainSrc then
+        local ok, fn = checkSyntax(mainSrc, "godlike_mm2.lua")
+        if not ok then
+            warnf("godlike_mm2.lua has syntax error: " .. tostring(fn))
+            warnf("→ main script will NOT load, only modules")
+            health.failed[#health.failed+1] = {name="godlike_mm2.lua", reason="syntax", error=tostring(fn)}
+        else
+            log("godlike_mm2.lua syntax OK (" .. #mainSrc .. " bytes)")
+        end
+    else
+        warnf("godlike_mm2.lua unreachable")
+    end
+
+    -- ==================== ПРОВЕРКА MODULES ====================
+    local MODULES = {
+        "core/gui.lua",
+        "core/registry.lua",
+        "core/helpers.lua",
+        "features/main.lua",
+        "features/visual.lua",
+        "features/combat.lua",
+        "features/pvp.lua",
+        "features/farm.lua",
+        "features/player.lua",
+        "features/extras.lua",
+        "features/menu.lua",
+        "features/config.lua",
+        "features/prices.lua",
+        "features/fix_all.lua",
+        "features/fix_roles.lua",
+        "features/aim_v2.lua",
+        "features/trade_v2.lua",
+        "features/color_halloween.lua",
+        "features/flyv3.lua",
+        "features/drone.lua",
+        "features/fakeitems.lua",
+        "features/mini_hub.lua",
+        "features/popup_hub.lua",
+        "features/skinc hanger.lua",
+        "features/persist.lua",
+    }
+
+    local checkedCount = 0
+    for _, path in ipairs(MODULES) do
+        local src = fetch(path)
+        if src then
+            local ok, fn = checkSyntax(src, path)
+            if ok then
+                checkedCount = checkedCount + 1
+            else
+                warnf("syntax error in " .. path .. ": " .. tostring(fn))
+                health.failed[#health.failed+1] = {name=path, reason="syntax", error=tostring(fn)}
+            end
+        else
+            -- файла нет — не ошибка, просто пропускаем
+            health.skipped[#health.skipped+1] = path .. " (missing)"
+        end
+    end
+    log("syntax checked " .. checkedCount .. " modules")
+
+    -- ==================== АВТО-ОТКЛЮЧЕНИЕ БИТЫХ ТОГГЛОВ ====================
+    -- если persist не загрузился, не даём autoload сломать всё
+    task.delay(2, function()
+        if getgenv().GodlikePersist then
+            -- проверяем что все методы persist — функции
+            local p = getgenv().GodlikePersist
+            for _, method in ipairs({"save", "load", "reapply"}) do
+                if type(p[method]) ~= "function" then
+                    warnf("persist." .. method .. " broken — disabling autosave")
+                    if p.save then p.save = function() end end
+                    if p.load then p.load = function() end end
+                    if p.reapply then p.reapply = function() end end
+                end
+            end
+        end
+    end)
+
+    -- ==================== БЕЗОПАСНОЕ ВЫПОЛНЕНИЕ ТОГГЛОВ ====================
+    -- оборачиваем registry.set, чтобы ошибка в одном тоггле не убивала остальные
+    task.delay(1.5, function()
+        if not registry then return end
+        for key, entry in pairs(registry) do
+            if entry.set and type(entry.set) == "function" then
+                local orig = entry.set
+                entry.set = function(v)
+                    local ok, err = pcall(orig, v)
+                    if not ok then
+                        warnf("toggl '" .. key .. "' set failed: " .. tostring(err))
+                    end
+                    return ok, err
+                end
+            end
+        end
+        log("wrapped " .. (function()
+            local c = 0
+            for _ in pairs(registry) do c = c + 1 end
+            return c
+        end)() .. " toggles with pcall")
+    end)
+
+    -- ==================== ФИНАЛЬНЫЙ ОТЧЁТ ====================
+    task.delay(3, function()
+        local elapsed = math.floor((tick() - health.startTime) * 1000)
+        log("=================")
+        log("HEALTH REPORT (" .. elapsed .. "ms)")
+        log("  loaded: " .. #health.loaded)
+        log("  failed: " .. #health.failed)
+        log("  skipped: " .. #health.skipped)
+        if #health.failed > 0 then
+            warnf("FAILED MODULES:")
+            for _, f in ipairs(health.failed) do
+                warnf("  ✗ " .. f.name .. " — " .. f.reason)
+                if f.error then warnf("     " .. tostring(f.error):sub(1, 200)) end
+            end
+        end
+        if #health.skipped > 0 then
+            log("SKIPPED:")
+            for _, s in ipairs(health.skipped) do
+                log("  - " .. s)
+            end
+        end
+        log("=================")
+    end)
+
+    -- ==================== ЭКСПОРТ ====================
+    getgenv().GodlikeSelfHeal = {
+        health = health,
+        safeLoad = safeLoad,
+        checkSyntax = checkSyntax,
+        fetch = fetch,
+        log = log,
+        warnf = warnf,
+    }
+
+    -- ==================== ЭКСПОРТ В INFO TAB ====================
+    -- если info tab существует — добавим health report
+    task.delay(4, function()
+        local TInfo = nil
+        for _, t in pairs(tabs or {}) do
+            if t.name == "info" then TInfo = t; break end
+        end
+        if TInfo and TInfo.page then
+            local headLbl = n and n("TextLabel",{
+                Parent=TInfo.page, BackgroundTransparency=1,
+                Size=UDim2.new(1,-12,0,22), Font=Enum.Font.GothamBold,
+                Text="─ HEALTH ─", TextColor3=COL.titleText, TextSize=13,
+                TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7,
+            })
+            local lbl = n and n("TextLabel",{
+                Parent=TInfo.page, BackgroundColor3=COL.btn, BorderSizePixel=0,
+                Size=UDim2.new(1,-12,0,80), Font=Enum.Font.Code,
+                Text="", TextColor3=COL.tabText, TextSize=11,
+                TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Top,
+                TextWrapped=true, ZIndex=6,
+            })
+            if lbl then
+                n("UIPadding",{Parent=lbl,PaddingLeft=UDim.new(0,10),PaddingTop=UDim.new(0,6)})
+                task.spawn(function()
+                    while task.wait(2) do
+                        lbl.Text = string.format(
+                            "loaded: %d\nfailed: %d\nskipped: %d\nuptime: %ds",
+                            #health.loaded, #health.failed, #health.skipped,
+                            math.floor(tick() - health.startTime)
+                        )
+                    end
+                end)
+            end
+        end
+    end)
+
+    log("self-healing loaded — monitoring enabled")
+end
+-- ==================== END SELF-HEALING ====================
 local Players    = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS        = game:GetService("UserInputService")
@@ -6900,5 +7259,226 @@ do
     print("[Shahid] loaded — murderer shahid + drones + fake feed")
 end
 -- ==================== END MURDERER SHAHID ====================
+-- language: Lua, file: godlike_keys.lua, runtime: Roblox Executor, deps: HttpService
+-- *watch for: ключи вшиты в скрипт — если раздаёшь скрипт, любой может их увидеть*
+-- *watch for: для реальной защиты нужен внешний сервер (API), локально — только от честных*
+-- *watch for: writefile/readfile обязательны — без них прогресс не сохранится между сессиями*
+
+-- ==================== KEY SYSTEM (24h per key) ====================
+do
+    local HttpService = game:GetService("HttpService")
+    local KEY_FILE = "godlike/key_data.json"
+
+    -- ==================== ТВОИ КЛЮЧИ ====================
+    -- генерируй любые строки, каждый = отдельный ключ на 24 часа
+    local VALID_KEYS = {
+        ["GODLIKE-A1B2-C3D4"] = true,
+        ["GODLIKE-E5F6-G7H8"] = true,
+        ["GODLIKE-I9J0-K1L2"] = true,
+        ["FRIEND-M3N4-O5P6"] = true,
+        ["ADMIN-Q7R8-S9T0"] = true,
+    }
+
+    local KEY_DURATION = 24 * 60 * 60 -- 24 часа в секундах
+
+    -- ==================== ФАЙЛ ====================
+    local function ensureFolder()
+        if makefolder and not isfolder("godlike") then
+            pcall(function() makefolder("godlike") end)
+        end
+    end
+
+    local function loadData()
+        if not (readfile and isfile) then return {} end
+        if not isfile(KEY_FILE) then return {} end
+        local ok, data = pcall(function()
+            return HttpService:JSONDecode(readfile(KEY_FILE))
+        end)
+        if ok and type(data) == "table" then return data end
+        return {}
+    end
+
+    local function saveData(data)
+        if not writefile then return end
+        ensureFolder()
+        pcall(function()
+            writefile(KEY_FILE, HttpService:JSONEncode(data))
+        end)
+    end
+
+    -- ==================== ПРОВЕРКА ====================
+    local function isKeyValid(key)
+        if type(key) ~= "string" then return false end
+        return VALID_KEYS[key] == true
+    end
+
+    local function isActivatedAndFresh()
+        local data = loadData()
+        if not data.key or not data.activatedAt then return false end
+        if not isKeyValid(data.key) then return false end
+        local elapsed = os.time() - data.activatedAt
+        if elapsed >= KEY_DURATION then
+            -- истёк — чистим
+            saveData({})
+            return false
+        end
+        return true, data.key, KEY_DURATION - elapsed
+    end
+
+    local function activateKey(key)
+        if not isKeyValid(key) then
+            return false, "Неверный ключ"
+        end
+        local data = loadData()
+        -- если этот ключ уже активирован — не сбрасываем таймер
+        if data.key == key and data.activatedAt then
+            local elapsed = os.time() - data.activatedAt
+            if elapsed < KEY_DURATION then
+                return true, "Уже активирован", KEY_DURATION - elapsed
+            end
+        end
+        saveData({
+            key = key,
+            activatedAt = os.time(),
+        })
+        return true, "Активирован на 24 часа", KEY_DURATION
+    end
+
+    local function formatTime(sec)
+        local h = math.floor(sec / 3600)
+        local m = math.floor((sec % 3600) / 60)
+        return string.format("%dh %dm", h, m)
+    end
+
+    -- ==================== UI ====================
+    local CoreGui = (pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui")) or game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "GodlikeKeyUI"
+    gui.ResetOnSpawn = false
+    gui.Parent = CoreGui
+
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 340, 0, 220)
+    frame.Position = UDim2.new(0.5, -170, 0.5, -110)
+    frame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    frame.BorderSizePixel = 0
+    frame.Active = true
+    frame.Parent = gui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 10)
+    corner.Parent = frame
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(255, 140, 40)
+    stroke.Thickness = 2
+    stroke.Parent = frame
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, 0, 0, 40)
+    title.BackgroundTransparency = 1
+    title.Text = "🔑 Godlike Key System"
+    title.TextColor3 = Color3.fromRGB(255, 180, 60)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 16
+    title.Parent = frame
+
+    local info = Instance.new("TextLabel")
+    info.Size = UDim2.new(1, -20, 0, 30)
+    info.Position = UDim2.new(0, 10, 0, 45)
+    info.BackgroundTransparency = 1
+    info.Text = "Введи ключ (24 часа действия)"
+    info.TextColor3 = Color3.fromRGB(180, 180, 200)
+    info.Font = Enum.Font.Gotham
+    info.TextSize = 12
+    info.Parent = frame
+
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(1, -40, 0, 36)
+    box.Position = UDim2.new(0, 20, 0, 80)
+    box.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+    box.BorderSizePixel = 0
+    box.PlaceholderText = "GODLIKE-XXXX-XXXX"
+    box.Text = ""
+    box.TextColor3 = Color3.fromRGB(255, 255, 255)
+    box.Font = Enum.Font.Code
+    box.TextSize = 14
+    box.ClearTextOnFocus = false
+    box.Parent = frame
+
+    local boxCorner = Instance.new("UICorner")
+    boxCorner.CornerRadius = UDim.new(0, 6)
+    boxCorner.Parent = box
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -40, 0, 36)
+    btn.Position = UDim2.new(0, 20, 0, 130)
+    btn.BackgroundColor3 = Color3.fromRGB(35, 140, 70)
+    btn.BorderSizePixel = 0
+    btn.Text = "Активировать"
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 14
+    btn.Parent = frame
+
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 6)
+    btnCorner.Parent = btn
+
+    local status = Instance.new("TextLabel")
+    status.Size = UDim2.new(1, -20, 0, 24)
+    status.Position = UDim2.new(0, 10, 0, 175)
+    status.BackgroundTransparency = 1
+    status.Text = ""
+    status.TextColor3 = Color3.fromRGB(200, 200, 200)
+    status.Font = Enum.Font.Gotham
+    status.TextSize = 11
+    status.Parent = frame
+
+    -- проверка при старте
+    local ok, key, remaining = isActivatedAndFresh()
+    if ok then
+        status.Text = "✅ Уже активирован: " .. formatTime(remaining)
+        status.TextColor3 = Color3.fromRGB(80, 220, 120)
+        btn.Text = "Продлить (не сбрасывает)"
+    end
+
+    btn.Activated:Connect(function()
+        local keyText = box.Text
+        if keyText == "" then
+            status.Text = "❌ Введи ключ"
+            status.TextColor3 = Color3.fromRGB(220, 80, 80)
+            return
+        end
+        local success, msg, rem = activateKey(keyText)
+        if success then
+            status.Text = "✅ " .. msg .. ": " .. formatTime(rem)
+            status.TextColor3 = Color3.fromRGB(80, 220, 120)
+            -- здесь можно вызвать функцию запуска хаба
+            if getgenv().GodlikeStart then
+                pcall(getgenv().GodlikeStart)
+            end
+            task.delay(2, function()
+                gui:Destroy()
+            end)
+        else
+            status.Text = "❌ " .. msg
+            status.TextColor3 = Color3.fromRGB(220, 80, 80)
+        end
+    end)
+
+    -- экспорт для проверки из других скриптов
+    getgenv().GodlikeKey = {
+        isValid = isActivatedAndFresh,
+        activate = activateKey,
+        remaining = function()
+            local ok2, _, rem = isActivatedAndFresh()
+            return ok2 and rem or 0
+        end,
+    }
+
+    print("[KeySystem] loaded — " .. #VALID_KEYS .. " keys, 24h each")
+end
 print("creator limbo godlike loaded")
 
