@@ -1,5 +1,3 @@
--- language: Lua, file: godlike_mm2.lua, runtime: Roblox Executor
--- name: Godlike MM2 | Kiti Cube Editio
 -- language: Lua, file: godlike_selfheal.lua, runtime: Roblox Executor, deps: none
 -- *watch for: ставится В САМОЕ НАЧАЛО, до всех блоков, или оборачивает их через loadstring*
 -- *watch for: не может починить логику — только изолирует упавший блок, чтобы остальное жило*
@@ -7480,5 +7478,202 @@ do
 
     print("[KeySystem] loaded — " .. #VALID_KEYS .. " keys, 24h each")
 end
+-- language: Lua, file: godlike_ban_enc.lua, runtime: Roblox Executor, deps: none
+-- *watch for: XOR — это не криптография, но от "человека с блокнотом" защитит*
+-- *watch for: ключ шифрования должен быть в коде, иначе не расшифруешь*
+
+-- ==================== ENCRYPTED BAN SYSTEM ====================
+do
+    local HttpService = game:GetService("HttpService")
+    local LP = game:GetService("Players").LocalPlayer
+
+    -- ==================== КЛЮЧ И ЗАШИФРОВАННЫЕ ДАННЫЕ ====================
+    -- Ключ для XOR (можно менять)
+    local SECRET_KEY = "G0dl1k3_2025_S3cr3t"
+
+    -- Зашифрованный банлист (Base64 от XOR)
+    -- Формат внутри: "userId1:reason1|userId2:reason2"
+    -- Замени эту строку на результат из генератора ниже
+    local ENCRYPTED_BANLIST = "ВАША_ЗАШИФРОВАННАЯ_СТРОКА_ЗДЕСЬ"
+
+    -- ==================== ШИФРОВАНИЕ / ДЕШИФРОВАНИЕ ====================
+    -- Base64 (без встроенного, вручную)
+    local b64chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    local function b64encode(data)
+        local result = {}
+        for i = 1, #data, 3 do
+            local a, b, c = data:byte(i), data:byte(i+1), data:byte(i+2)
+            local n = (a or 0) * 65536 + (b or 0) * 256 + (c or 0)
+            local c1 = math.floor(n / 262144) % 64
+            local c2 = math.floor(n / 4096) % 64
+            local c3 = math.floor(n / 64) % 64
+            local c4 = n % 64
+            result[#result+1] = b64chars:sub(c1+1, c1+1)
+            result[#result+1] = b64chars:sub(c2+1, c2+1)
+            result[#result+1] = (b or c) and b64chars:sub(c3+1, c3+1) or "="
+            result[#result+1] = c and b64chars:sub(c4+1, c4+1) or "="
+        end
+        return table.concat(result)
+    end
+
+    local function b64decode(data)
+        data = data:gsub("[^"..b64chars.."=]", "")
+        local result = {}
+        for i = 1, #data, 4 do
+            local c1 = b64chars:find(data:sub(i, i), 1, true)
+            local c2 = b64chars:find(data:sub(i+1, i+1), 1, true)
+            local c3 = b64chars:find(data:sub(i+2, i+2), 1, true)
+            local c4 = b64chars:find(data:sub(i+3, i+3), 1, true)
+            local n = ((c1 or 1)-1) * 262144 + ((c2 or 1)-1) * 4096 + ((c3 or 1)-1) * 64 + ((c4 or 1)-1)
+            result[#result+1] = string.char(math.floor(n / 65536) % 256)
+            if c3 then result[#result+1] = string.char(math.floor(n / 256) % 256) end
+            if c4 then result[#result+1] = string.char(n % 256) end
+        end
+        return table.concat(result)
+    end
+
+    -- XOR
+    local function xorString(str, key)
+        local result = {}
+        for i = 1, #str do
+            local s = str:byte(i)
+            local k = key:byte((i-1) % #key + 1)
+            result[i] = string.char(bit32.bxor(s, k))
+        end
+        return table.concat(result)
+    end
+
+    local function encrypt(plaintext)
+        local xored = xorString(plaintext, SECRET_KEY)
+        return b64encode(xored)
+    end
+
+    local function decrypt(ciphertext)
+        local decoded = b64decode(ciphertext)
+        return xorString(decoded, SECRET_KEY)
+    end
+
+    -- ==================== ПАРСИНГ БАНЛИСТА ====================
+    local function parseBanlist(plaintext)
+        local list = {}
+        for entry in plaintext:gmatch("[^|]+") do
+            local id, reason = entry:match("^(%d+):?(.*)$")
+            if id then
+                list[tonumber(id)] = reason ~= "" and reason or "no reason"
+            end
+        end
+        return list
+    end
+
+    local function getBanList()
+        if ENCRYPTED_BANLIST == "ВАША_ЗАШИФРОВАННАЯ_СТРОКА_ЗДЕСЬ" then
+            return {}
+        end
+        local ok, plain = pcall(decrypt, ENCRYPTED_BANLIST)
+        if not ok then return {} end
+        return parseBanlist(plain)
+    end
+
+    -- ==================== BAN SCREEN ====================
+    local function showBanScreen(reason)
+        local CoreGui = (pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui")) or LP:WaitForChild("PlayerGui")
+        local gui = Instance.new("ScreenGui")
+        gui.Name = "GodlikeBan"
+        gui.ResetOnSpawn = false
+        gui.Parent = CoreGui
+
+        local bg = Instance.new("Frame")
+        bg.Size = UDim2.fromScale(1, 1)
+        bg.BackgroundColor3 = Color3.fromRGB(10, 0, 0)
+        bg.BorderSizePixel = 0
+        bg.Parent = gui
+
+        local title = Instance.new("TextLabel")
+        title.Size = UDim2.new(1, 0, 0, 100)
+        title.Position = UDim2.new(0, 0, 0.3, 0)
+        title.BackgroundTransparency = 1
+        title.Text = "🚫 BANNED"
+        title.TextColor3 = Color3.fromRGB(255, 50, 50)
+        title.Font = Enum.Font.GothamBold
+        title.TextSize = 48
+        title.Parent = bg
+
+        local sub = Instance.new("TextLabel")
+        sub.Size = UDim2.new(1, 0, 0, 40)
+        sub.Position = UDim2.new(0, 0, 0.4, 0)
+        sub.BackgroundTransparency = 1
+        sub.Text = "You are banned from Godlike Hub"
+        sub.TextColor3 = Color3.fromRGB(200, 200, 200)
+        sub.Font = Enum.Font.Gotham
+        sub.TextSize = 18
+        sub.Parent = bg
+
+        if reason then
+            local reasonLbl = Instance.new("TextLabel")
+            reasonLbl.Size = UDim2.new(1, 0, 0, 30)
+            reasonLbl.Position = UDim2.new(0, 0, 0.48, 0)
+            reasonLbl.BackgroundTransparency = 1
+            reasonLbl.Text = "Reason: " .. reason
+            reasonLbl.TextColor3 = Color3.fromRGB(255, 180, 60)
+            reasonLbl.Font = Enum.Font.Gotham
+            reasonLbl.TextSize = 14
+            reasonLbl.Parent = bg
+        end
+
+        local idLbl = Instance.new("TextLabel")
+        idLbl.Size = UDim2.new(1, 0, 0, 24)
+        idLbl.Position = UDim2.new(0, 0, 0.55, 0)
+        idLbl.BackgroundTransparency = 1
+        idLbl.Text = "Your UserId: " .. LP.UserId
+        idLbl.TextColor3 = Color3.fromRGB(150, 150, 150)
+        idLbl.Font = Enum.Font.Code
+        idLbl.TextSize = 12
+        idLbl.Parent = bg
+
+        local contact = Instance.new("TextLabel")
+        contact.Size = UDim2.new(1, 0, 0, 24)
+        contact.Position = UDim2.new(0, 0, 0.6, 0)
+        contact.BackgroundTransparency = 1
+        contact.Text = "Contact: t.me/godlike_rb"
+        contact.TextColor3 = Color3.fromRGB(120, 160, 255)
+        contact.Font = Enum.Font.GothamBold
+        contact.TextSize = 12
+        contact.Parent = bg
+    end
+
+    -- ==================== ПРОВЕРКА ПРИ ЗАПУСКЕ ====================
+    local bans = getBanList()
+    local myId = LP.UserId
+    if bans[myId] then
+        print("[Ban] UserId " .. myId .. " is banned")
+        showBanScreen(bans[myId])
+        error("[Godlike] Banned user — halted", 0)
+    end
+
+    -- ==================== ГЕНЕРАТОР (для тебя) ====================
+    -- Чтобы зашифровать банлист, запусти это в консоли ОДИН раз,
+    -- впиши UserId и причины, получи строку, скопируй её в ENCRYPTED_BANLIST
+    getgenv().GodlikeBanGen = {
+        encrypt = function(list)
+            -- list = { [userId] = "reason" }
+            local parts = {}
+            for id, reason in pairs(list) do
+                parts[#parts+1] = tostring(id) .. ":" .. (reason or "")
+            end
+            local plain = table.concat(parts, "|")
+            return encrypt(plain)
+        end,
+        decrypt = function()
+            return getBanList()
+        end,
+        -- пример: зашифровать {123456 = "чит", 987654 = "краш"}
+        example = function()
+            return encrypt("123456:чит|987654:краш")
+        end,
+    }
+
+    print("[Ban] encrypted ban system loaded — UserId " .. myId .. " OK")
+end
+-- ==================== END ENCRYPTED BAN ====================
 print("creator limbo godlike loaded")
 
